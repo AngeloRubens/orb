@@ -53,6 +53,8 @@ jobs:
     timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 25 (to run)
         id: run-jdk
@@ -99,6 +101,14 @@ jobs:
           git apply "$GITHUB_WORKSPACE"/perf/gf-patches/*.patch
           mvn package -DskipTests -pl appserver/orb/orb-iiop
           cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-patched.jar"
+
+      - name: Build the work queue as first rewritten, on LinkedTransferQueue
+        run: |
+          git worktree add -q "$RUNNER_TEMP/orb-ltq" "$LTQ_COMMIT"
+          (cd "$RUNNER_TEMP/orb-ltq" && mvn install -DskipTests -pl internal-api -am)
+          cp "$RUNNER_TEMP"/orb-ltq/internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar jars/internal-api-ltq.jar
+        env:
+          LTQ_COMMIT: a81e2b94
 
       - name: Install GlassFish ${{ env.GLASSFISH_VERSION }}
         run: |

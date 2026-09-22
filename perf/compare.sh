@@ -13,6 +13,7 @@
 #   C64  as C with 64 KB fragments, buffers starting at 1 KB
 #   Cnq  as C but with internal-api from master: every change except the work queue
 #   Bq   as B but with internal-api with these changes: only the work queue
+#   Bltq as B with the work queue as first rewritten, on LinkedTransferQueue
 #
 # Rounds interleave the configs so that drift on the machine hits all of them.
 #
@@ -67,6 +68,7 @@ for r in $(seq 1 "$rounds"); do
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=65536 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
             Cnq) install orb-patched.jar  internal-api-master.jar   orb-iiop-patched.jar  1024 ;;
             Bq)  install orb-master.jar   internal-api-patched.jar  orb-iiop-released.jar 1024 ;;
+            Bltq) install orb-master.jar  internal-api-ltq.jar      orb-iiop-released.jar 1024 ;;
             *)   echo "unknown config $c"; exit 1 ;;
         esac || { echo "config $c did not start"; exit 1; }
         for sc in $SCENARIOS; do

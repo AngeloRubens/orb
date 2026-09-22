@@ -18,6 +18,7 @@ CONFIGS = {
     "C64": "ORB + orb-iiop with these changes, 64 KB fragments, 1 KB initial buffer",
     "Cnq": "as C, but the work queue from master (every change except the queue)",
     "Bq": "as B, plus only the new work queue",
+    "Bltq": "as B, plus the work queue on LinkedTransferQueue (first rewrite)",
 }
 SCENARIOS = {
     "small": "greet(\"hi\", 1): a small request and reply",
