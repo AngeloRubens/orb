@@ -14,6 +14,7 @@
 #   Cnq  as C but with internal-api from master: every change except the work queue
 #   Bq   as B but with internal-api with these changes: only the work queue
 #   Bltq as B with the work queue as first rewritten, on LinkedTransferQueue
+#   Cnf  as C but without processing the next fragment inline
 #
 # Rounds interleave the configs so that drift on the machine hits all of them.
 #
@@ -69,6 +70,7 @@ for r in $(seq 1 "$rounds"); do
             Cnq) install orb-patched.jar  internal-api-master.jar   orb-iiop-patched.jar  1024 ;;
             Bq)  install orb-master.jar   internal-api-patched.jar  orb-iiop-released.jar 1024 ;;
             Bltq) install orb-master.jar  internal-api-ltq.jar      orb-iiop-released.jar 1024 ;;
+            Cnf) install orb-noinline.jar internal-api-patched.jar  orb-iiop-patched.jar  1024 ;;
             *)   echo "unknown config $c"; exit 1 ;;
         esac || { echo "config $c did not start"; exit 1; }
         for sc in $SCENARIOS; do

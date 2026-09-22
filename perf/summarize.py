@@ -19,6 +19,7 @@ CONFIGS = {
     "Cnq": "as C, but the work queue from master (every change except the queue)",
     "Bq": "as B, plus only the new work queue",
     "Bltq": "as B, plus the work queue on LinkedTransferQueue (first rewrite)",
+    "Cnf": "as C, without processing the next fragment inline",
 }
 SCENARIOS = {
     "small": "greet(\"hi\", 1): a small request and reply",

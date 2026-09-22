@@ -110,6 +110,14 @@ jobs:
         env:
           LTQ_COMMIT: a81e2b94
 
+      - name: Build the ORB with every change except inline fragment processing
+        run: |
+          git worktree add -q "$RUNNER_TEMP/orb-noinline" "$NOINLINE_COMMIT"
+          (cd "$RUNNER_TEMP/orb-noinline" && mvn install -DskipTests -pl orbmain -am)
+          cp "$RUNNER_TEMP"/orb-noinline/orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar jars/orb-noinline.jar
+        env:
+          NOINLINE_COMMIT: 51bb5704
+
       - name: Install GlassFish ${{ env.GLASSFISH_VERSION }}
         run: |
           curl -sSL -o "$RUNNER_TEMP/glassfish.zip" \
