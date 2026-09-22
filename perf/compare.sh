@@ -50,9 +50,15 @@ run() {   # config round scenario client-properties bean
     "$RUN_JAVA/bin/jcmd" "$(server_pid)" JFR.start name=$label settings=profile \
         delay=${W}s duration=${D}s filename="$JFR_DIR/server-$label.jfr" >/dev/null \
         || echo "JFR not started for $label"
+    local log="$JFR_DIR/client-$label.log"
     VMARGS="-Dscenario=$3 -Dbean=$5 -Dthreads=$TH -Dwarmup=$W -Dseconds=$D $4" \
-        "$GF/glassfish/bin/appclient" -client "$CLIENT" 2>&1 \
-        | grep -E 'RESULT' | sed "s/^/config=$1 round=$2 /" | tee -a "$OUT"
+        "$GF/glassfish/bin/appclient" -client "$CLIENT" > "$log" 2>&1
+    if grep -q 'RESULT' "$log"; then
+        grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | tee -a "$OUT"
+    else
+        echo "NO RESULT for $label; the client said:"
+        grep -vE '^\s*$' "$log" | grep -iE 'exception|error|caused by' | head -15
+    fi
     sleep 3
 }
 
