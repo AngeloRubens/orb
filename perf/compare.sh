@@ -15,6 +15,8 @@
 #   Bq   as B but with internal-api with these changes: only the work queue
 #   Bltq as B with the work queue as first rewritten, on LinkedTransferQueue
 #   Cnf  as C but without processing the next fragment inline
+#   Cltq as C but with the work queue on LinkedTransferQueue
+#   C64ltq as C64 but with the work queue on LinkedTransferQueue
 #
 # Rounds interleave the configs so that drift on the machine hits all of them.
 #
@@ -78,6 +80,9 @@ for r in $(seq 1 "$rounds"); do
             Bq)  install orb-master.jar   internal-api-patched.jar  orb-iiop-released.jar 1024 ;;
             Bltq) install orb-master.jar  internal-api-ltq.jar      orb-iiop-released.jar 1024 ;;
             Cnf) install orb-noinline.jar internal-api-patched.jar  orb-iiop-patched.jar  1024 ;;
+            Cltq) install orb-patched.jar internal-api-ltq.jar      orb-iiop-patched.jar  1024 ;;
+            C64ltq) install orb-patched.jar internal-api-ltq.jar    orb-iiop-patched.jar  65536
+                 client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=65536 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
             *)   echo "unknown config $c"; exit 1 ;;
         esac || { echo "config $c did not start"; exit 1; }
         for bean in $BEANS; do
