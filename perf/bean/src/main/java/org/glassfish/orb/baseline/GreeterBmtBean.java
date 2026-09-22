@@ -24,7 +24,9 @@ import jakarta.ejb.TransactionManagementType;
  * GreeterBean without container managed transactions: the container does
  * not begin and end a transaction around each call. Still pooled.
  */
-@Stateless
+// Its own mappedName: GlassFish otherwise also binds every remote view under
+// the interface name, which GreeterBean already holds.
+@Stateless(mappedName = "orb-baseline/GreeterBmtBean")
 @TransactionManagement(TransactionManagementType.BEAN)
 // implements Greeter again: business interfaces come from the bean class's own
 // implements clause, not from its superclass.

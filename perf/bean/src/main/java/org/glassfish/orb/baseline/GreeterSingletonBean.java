@@ -29,7 +29,9 @@ import jakarta.ejb.TransactionManagementType;
  * per call. The IIOP security interceptors and the authorization check
  * still run, as they do for every remote EJB call.
  */
-@Singleton
+// Its own mappedName: GlassFish otherwise also binds every remote view under
+// the interface name, which GreeterBean already holds.
+@Singleton(mappedName = "orb-baseline/GreeterSingletonBean")
 @ConcurrencyManagement(ConcurrencyManagementType.BEAN)
 @TransactionManagement(TransactionManagementType.BEAN)
 // implements Greeter again: business interfaces come from the bean class's own
