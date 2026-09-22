@@ -26,5 +26,7 @@ import jakarta.ejb.TransactionManagementType;
  */
 @Stateless
 @TransactionManagement(TransactionManagementType.BEAN)
-public class GreeterBmtBean extends GreeterBean {
+// implements Greeter again: business interfaces come from the bean class's own
+// implements clause, not from its superclass.
+public class GreeterBmtBean extends GreeterBean implements Greeter {
 }

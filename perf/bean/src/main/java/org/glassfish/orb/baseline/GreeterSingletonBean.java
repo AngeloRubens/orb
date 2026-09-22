@@ -32,5 +32,7 @@ import jakarta.ejb.TransactionManagementType;
 @Singleton
 @ConcurrencyManagement(ConcurrencyManagementType.BEAN)
 @TransactionManagement(TransactionManagementType.BEAN)
-public class GreeterSingletonBean extends GreeterBean {
+// implements Greeter again: business interfaces come from the bean class's own
+// implements clause, not from its superclass.
+public class GreeterSingletonBean extends GreeterBean implements Greeter {
 }
