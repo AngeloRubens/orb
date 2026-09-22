@@ -82,11 +82,24 @@ public final class IiopLoad {
                     cur = cur.next;
                 }
                 Values.Node payload = head;
-                return g -> check(g.echoNode(payload).name.equals("n0"));
+                return g -> {
+                    // Every node back, in order: a lost or misplaced fragment shows here.
+                    Values.Node back = g.echoNode(payload);
+                    for (int i = 0; i < n; i++, back = back.next) {
+                        check(back != null && back.name.equals("n" + i));
+                    }
+                    check(back == null);
+                };
             }
             case "large": {
-                String payload = "x".repeat(Integer.getInteger("largeBytes", 64 * 1024));
-                return g -> check(g.echoLarge(payload).length() == payload.length());
+                // Not one repeated char: the content must come back exactly.
+                StringBuilder sb = new StringBuilder();
+                int size = Integer.getInteger("largeBytes", 64 * 1024);
+                for (int i = 0; sb.length() < size; i++) {
+                    sb.append((char) ('a' + i % 26)).append(i % 97 == 0 ? "é€" : "");
+                }
+                String payload = sb.substring(0, size);
+                return g -> check(g.echoLarge(payload).equals(payload));
             }
             default:
                 throw new IllegalArgumentException(scenario);
