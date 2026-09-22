@@ -16,6 +16,9 @@ on:
       configs:
         description: Configurations
         default: "A B B64 C C64"
+      scenarios:
+        description: Scenarios
+        default: "small graph large"
 
 env:
   GLASSFISH_VERSION: 8.0.4
@@ -129,6 +132,7 @@ jobs:
           RUN_JAVA: ${{ steps.run-jdk.outputs.path }}
           OUT: ${{ github.workspace }}/results/compare.txt
           JFR_DIR: ${{ github.workspace }}/results/jfr
+          SCENARIOS: ${{ inputs.scenarios || 'small graph large' }}
         run: |
           mkdir -p results
           perf/compare.sh "${{ inputs.rounds || '2' }}" ${{ inputs.configs || 'A B B64 C C64' }}

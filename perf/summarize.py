@@ -16,6 +16,8 @@ CONFIGS = {
     "B64": "ORB master, 64 KB fragments (buffer = fragment)",
     "C": "ORB + orb-iiop with these changes, 1 KB fragments",
     "C64": "ORB + orb-iiop with these changes, 64 KB fragments, 1 KB initial buffer",
+    "Cnq": "as C, but the work queue from master (every change except the queue)",
+    "Bq": "as B, plus only the new work queue",
 }
 SCENARIOS = {
     "small": "greet(\"hi\", 1): a small request and reply",

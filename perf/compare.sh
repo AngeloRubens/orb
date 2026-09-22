@@ -11,6 +11,8 @@
 #   B64  as B with 64 KB fragments, buffers as large as a fragment
 #   C    ORB and orb-iiop with these changes, 1 KB fragments (the default)
 #   C64  as C with 64 KB fragments, buffers starting at 1 KB
+#   Cnq  as C but with internal-api from master: every change except the work queue
+#   Bq   as B but with internal-api with these changes: only the work queue
 #
 # Rounds interleave the configs so that drift on the machine hits all of them.
 #
@@ -20,6 +22,7 @@ set -u
 
 MOD=$GF/glassfish/modules
 W=${W:-15}; D=${D:-45}; TH=${TH:-8}
+SCENARIOS=${SCENARIOS:-small graph large}
 export JAVA_HOME=$RUN_JAVA AS_JAVA=$RUN_JAVA
 mkdir -p "$JFR_DIR"
 
@@ -36,15 +39,14 @@ install() {   # orb internal-api orb-iiop fragment-size
 }
 
 server_pid() {
-    for p in $(pgrep -f 'GlassFishMain.*domain1'); do
-        [ "$(readlink /proc/$p/exe)" = "$RUN_JAVA/bin/java" ] && echo $p
-    done | head -1
+    "$RUN_JAVA/bin/jcmd" -l | awk '/GlassFishMain/ && /domain1/ {print $1; exit}'
 }
 
 run() {   # config round scenario client-properties
     local label=$1-r$2-$3
     "$RUN_JAVA/bin/jcmd" "$(server_pid)" JFR.start name=$label settings=profile \
-        delay=${W}s duration=${D}s filename="$JFR_DIR/server-$label.jfr" >/dev/null 2>&1
+        delay=${W}s duration=${D}s filename="$JFR_DIR/server-$label.jfr" >/dev/null \
+        || echo "JFR not started for $label"
     VMARGS="-Dscenario=$3 -Dthreads=$TH -Dwarmup=$W -Dseconds=$D $4" \
         "$GF/glassfish/bin/appclient" -client "$CLIENT" 2>&1 \
         | grep -E 'RESULT' | sed "s/^/config=$1 round=$2 /" | tee -a "$OUT"
@@ -63,9 +65,11 @@ for r in $(seq 1 "$rounds"); do
             C)   install orb-patched.jar  internal-api-patched.jar  orb-iiop-patched.jar  1024 ;;
             C64) install orb-patched.jar  internal-api-patched.jar  orb-iiop-patched.jar  65536
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=65536 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
+            Cnq) install orb-patched.jar  internal-api-master.jar   orb-iiop-patched.jar  1024 ;;
+            Bq)  install orb-master.jar   internal-api-patched.jar  orb-iiop-released.jar 1024 ;;
             *)   echo "unknown config $c"; exit 1 ;;
         esac || { echo "config $c did not start"; exit 1; }
-        for sc in small graph large; do
+        for sc in $SCENARIOS; do
             run "$c" "$r" "$sc" "$client"
         done
     done
