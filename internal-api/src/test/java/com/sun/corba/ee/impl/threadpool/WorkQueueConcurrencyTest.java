@@ -106,6 +106,71 @@ public class WorkQueueConcurrencyTest {
         }
     }
 
+    /**
+     * Work added while the only worker is searching wakes nobody - the
+     * searching worker is expected to find it. It must, on its last look
+     * before parking.
+     */
+    @Test
+    public void work_added_while_the_worker_searches_is_not_left_until_a_timeout() throws Exception {
+        try (ThreadPoolImpl pool = new ThreadPoolImpl(1, 1, 30_000L, "last-look")) {
+            WorkQueueImpl queue = (WorkQueueImpl) pool.getAnyWorkQueue();
+            awaitAvailable(pool, 1);
+
+            CountDownLatch ran = new CountDownLatch(1);
+            AtomicInteger fired = new AtomicInteger();
+            queue.afterEmptyLookForTesting = () -> {
+                if (fired.getAndIncrement() == 0) {
+                    queue.addWork(new Task(ran::countDown));
+                }
+            };
+            // Wake the worker; once done it searches again and the hook adds work.
+            queue.addWork(new Task(() -> { }));
+
+            assertTrue("the item must run now, not after the 30 s timeout", ran.await(5, TimeUnit.SECONDS));
+        }
+    }
+
+    /**
+     * Two items added while one worker searches: it takes one, and must get
+     * the parked worker onto the other. Here the two can only finish together.
+     */
+    @Test
+    public void a_worker_that_leaves_work_behind_wakes_another() throws Exception {
+        try (ThreadPoolImpl pool = new ThreadPoolImpl(2, 2, 30_000L, "propagate")) {
+            WorkQueueImpl queue = (WorkQueueImpl) pool.getAnyWorkQueue();
+            awaitAvailable(pool, 2);
+
+            CyclicBarrier together = new CyclicBarrier(2);
+            CountDownLatch done = new CountDownLatch(2);
+            Runnable both = () -> {
+                try {
+                    together.await(10, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+                done.countDown();
+            };
+            AtomicInteger fired = new AtomicInteger();
+            queue.afterEmptyLookForTesting = () -> {
+                if (fired.getAndIncrement() == 0) {
+                    queue.addWork(new Task(both));
+                    queue.addWork(new Task(both));
+                }
+            };
+            queue.addWork(new Task(() -> { }));
+
+            assertTrue("both items must run at once", done.await(5, TimeUnit.SECONDS));
+        }
+    }
+
+    private static void awaitAvailable(ThreadPoolImpl pool, int threads) throws InterruptedException {
+        for (int i = 0; i < 500 && pool.numberOfAvailableThreads() < threads; i++) {
+            Thread.sleep(10);
+        }
+        assertEquals(threads, pool.numberOfAvailableThreads());
+    }
+
     @Test
     public void concurrent_producers_never_take_the_pool_past_its_maximum() throws Exception {
         final int max = 4;
