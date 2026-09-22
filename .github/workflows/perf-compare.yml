@@ -1,0 +1,154 @@
+name: ORB before/after
+
+# Builds and tests the ORB with these changes, then runs the same RMI-IIOP
+# load against GlassFish 8.0.4 with three ORB builds swapped in, on one
+# runner: GlassFish as released, ORB master without these changes, and these
+# changes. See perf/compare.sh for the configurations.
+
+on:
+  push:
+    branches: [ perf/ci ]
+  workflow_dispatch:
+    inputs:
+      rounds:
+        description: Rounds (each runs every configuration once)
+        default: "2"
+      configs:
+        description: Configurations
+        default: "A B B64 C C64"
+
+env:
+  GLASSFISH_VERSION: 8.0.4
+  MAVEN_ARGS: -B -ntp
+
+jobs:
+  tests:
+    name: Unit tests (JDK 21)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build and test internal-api and orbmain
+        run: mvn install -pl internal-api,orbmain -am
+
+      - name: Test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: '**/target/surefire-reports/*.txt'
+
+  compare:
+    name: Load comparison (build JDK 21, run JRE 25)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 25 (to run)
+        id: run-jdk
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up JDK 21 (to build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Runner
+        run: |
+          {
+            echo "### Runner"
+            echo '```'
+            nproc; free -g | head -2; lscpu | grep -E 'Model name|^CPU\(s\)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the ORB with these changes
+        run: |
+          mvn install -DskipTests -pl internal-api,orbmain -am
+          mkdir -p jars
+          cp orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar jars/orb-patched.jar
+          cp internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar jars/internal-api-patched.jar
+
+      - name: Build ORB master without these changes
+        run: |
+          git clone -q --depth 1 https://github.com/eclipse-ee4j/orb.git "$RUNNER_TEMP/orb-master"
+          echo "ORB master: $(git -C "$RUNNER_TEMP/orb-master" log -1 --format='%h %s')" >> "$GITHUB_STEP_SUMMARY"
+          (cd "$RUNNER_TEMP/orb-master" && mvn install -DskipTests -pl internal-api,orbmain -am)
+          cp "$RUNNER_TEMP"/orb-master/orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar jars/orb-master.jar
+          cp "$RUNNER_TEMP"/orb-master/internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar jars/internal-api-master.jar
+
+      - name: Build orb-iiop ${{ env.GLASSFISH_VERSION }} with the GlassFish changes
+        run: |
+          git clone -q --depth 1 --branch "$GLASSFISH_VERSION" https://github.com/eclipse-ee4j/glassfish.git "$RUNNER_TEMP/glassfish"
+          cd "$RUNNER_TEMP/glassfish"
+          git apply "$GITHUB_WORKSPACE"/perf/gf-patches/*.patch
+          mvn package -DskipTests -pl appserver/orb/orb-iiop
+          cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-patched.jar"
+
+      - name: Install GlassFish ${{ env.GLASSFISH_VERSION }}
+        run: |
+          curl -sSL -o "$RUNNER_TEMP/glassfish.zip" \
+            "https://github.com/eclipse-ee4j/glassfish/releases/download/${GLASSFISH_VERSION}/glassfish-${GLASSFISH_VERSION}.zip"
+          unzip -q "$RUNNER_TEMP/glassfish.zip" -d "$RUNNER_TEMP/gf"
+          M="$RUNNER_TEMP/gf/glassfish8/glassfish/modules"
+          cp "$M/glassfish-corba-orb.jar" jars/orb-released.jar
+          cp "$M/glassfish-corba-internal-api.jar" jars/internal-api-released.jar
+          cp "$M/orb-iiop.jar" jars/orb-iiop-released.jar
+          ls -l jars
+
+      - name: Build the test bean and the load client
+        run: mvn package -f perf/pom.xml
+
+      - name: Deploy the test bean
+        env:
+          JAVA_HOME: ${{ steps.run-jdk.outputs.path }}
+          AS_JAVA: ${{ steps.run-jdk.outputs.path }}
+        run: |
+          GF="$RUNNER_TEMP/gf/glassfish8"
+          "$GF/bin/asadmin" start-domain
+          "$GF/bin/asadmin" deploy perf/bean/target/orb-baseline-bean.jar
+          "$GF/bin/asadmin" stop-domain
+
+      - name: Compare
+        env:
+          GF: ${{ runner.temp }}/gf/glassfish8
+          JARS: ${{ github.workspace }}/jars
+          CLIENT: ${{ github.workspace }}/perf/load/target/orb-load-client.jar
+          RUN_JAVA: ${{ steps.run-jdk.outputs.path }}
+          OUT: ${{ github.workspace }}/results/compare.txt
+          JFR_DIR: ${{ github.workspace }}/results/jfr
+        run: |
+          mkdir -p results
+          perf/compare.sh "${{ inputs.rounds || '2' }}" ${{ inputs.configs || 'A B B64 C C64' }}
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f results/compare.txt ]; then
+            python3 perf/summarize.py results/compare.txt | tee results/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Server log on failure
+        if: failure()
+        run: tail -200 "$RUNNER_TEMP/gf/glassfish8/glassfish/domains/domain1/logs/server.log" || true
+
+      - name: Results and JFR recordings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orb-compare-results
+          path: |
+            results/
+            jars/

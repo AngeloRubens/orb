@@ -1,0 +1,65 @@
+From d2e99ab1b4e4dd4cc4304424b553c66f715663bf Mon Sep 17 00:00:00 2001
+From: Angelo Rubini <angelorubini@hotmail.it>
+Date: Tue, 22 Sep 2026 12:11:24 +0200
+Subject: [PATCH 1/2] Resolve the EJB service once, not on every IIOP request
+
+POAProtocolMgr.getEjbDescriptor runs for every incoming EJB request and
+asked its Provider<EjbService> for the service each time. That is a full
+HK2 lookup - a cache key, an injectee, qualifier sets - for a singleton
+that never changes once it exists. Under a load of small remote calls it
+was about five percent of the bytes the server allocated.
+
+The service is now kept after the first successful lookup. A null answer
+is not kept: without the EJB container there is no service yet, and the
+provider has to be asked again later, as before.
+
+Signed-off-by: Angelo Rubini <angelorubini@hotmail.it>
+---
+ .../enterprise/iiop/impl/POAProtocolMgr.java  | 21 +++++++++++++++++--
+ 1 file changed, 19 insertions(+), 2 deletions(-)
+
+diff --git a/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/POAProtocolMgr.java b/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/POAProtocolMgr.java
+index f27d05ac1e..0c4d1cf3c5 100644
+--- a/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/POAProtocolMgr.java
++++ b/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/POAProtocolMgr.java
+@@ -91,6 +91,15 @@ public final class POAProtocolMgr extends org.omg.CORBA.LocalObject implements P
+     @Inject
+     private Provider<EjbService> ejbServiceProvider;
+ 
++    /**
++     * The EjbService, once there is one. It is a singleton, but asking the
++     * provider for it runs a full HK2 lookup - cache keys, an injectee,
++     * qualifier sets - and this is asked on every incoming EJB request.
++     * Only a found service is kept: without the EJB container there is none
++     * yet, and the provider must be asked again later.
++     */
++    private volatile EjbService ejbService;
++
+     @Override
+     public void initialize(org.omg.CORBA.ORB orb) {
+         this.orb = (ORB) orb;
+@@ -319,11 +328,19 @@ public final class POAProtocolMgr extends org.omg.CORBA.LocalObject implements P
+             }
+             long ejbId = Utility.bytesToLong(ejbKey, EJBID_OFFSET);
+             LOG.log(DEBUG, "getEjbDescriptor: {0}: ejbId: {1}", ejbKey, ejbId);
+-            EjbService ejbService = ejbServiceProvider.get();
+-            result = ejbService.ejbIdToDescriptor(ejbId);
++            result = getEjbService().ejbIdToDescriptor(ejbId);
+         } finally {
+             LOG.log(DEBUG, "getEjbDescriptor<-: {0}: {1}", ejbKey, result);
+         }
+         return result;
+    }
++
++    private EjbService getEjbService() {
++        EjbService service = ejbService;
++        if (service == null) {
++            service = ejbServiceProvider.get();
++            ejbService = service;
++        }
++        return service;
++    }
+ }
+-- 
+2.34.1
+

@@ -1,0 +1,59 @@
+From 6146e8f03c41db66aa0b622162390097fdc32cda Mon Sep 17 00:00:00 2001
+From: Angelo Rubini <angelorubini@hotmail.it>
+Date: Tue, 22 Sep 2026 12:11:24 +0200
+Subject: [PATCH 2/2] Stop tying the ORB's buffer size to the message fragment
+ size
+
+OrbCreator set the GIOP buffer size equal to message-fragment-size, so
+every message started in a buffer as large as a whole fragment. Raising
+the fragment size to cut the number of fragments for large messages -
+measured: a 64 KB fragment size about doubles the throughput of calls
+carrying a 64 KB string - then also cost small calls a fifth of their
+throughput, because each of them allocated a 64 KB buffer.
+
+The ORB now starts a streamed message in the GIOP buffer size and grows
+it up to the fragment size only when the message needs it, so the buffer
+size can stay small. It is set to the fragment size or 1024, whichever is
+smaller: 1024 is what small messages started in before, with the default
+fragment size.
+
+With an ORB that does not grow its buffers the stream buffer is still the
+fragment size, as before; only the GIOP 1.0 growing buffer starts smaller.
+
+Signed-off-by: Angelo Rubini <angelorubini@hotmail.it>
+---
+ .../glassfish/enterprise/iiop/impl/OrbCreator.java    | 11 ++++++++++-
+ 1 file changed, 10 insertions(+), 1 deletion(-)
+
+diff --git a/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/OrbCreator.java b/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/OrbCreator.java
+index 6be31f9a26..73fd178e0f 100644
+--- a/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/OrbCreator.java
++++ b/appserver/orb/orb-iiop/src/main/java/org/glassfish/enterprise/iiop/impl/OrbCreator.java
+@@ -82,6 +82,15 @@ final class OrbCreator {
+     private static final String SUN_GIOP_DEFAULT_FRAGMENT_SIZE = "8192";
+     private static final String SUN_GIOP_DEFAULT_BUFFER_SIZE = "8192";
+ 
++    /**
++     * The buffer a GIOP message starts in. The ORB grows it, up to the
++     * fragment size, only for the messages that need more, so a large
++     * message-fragment-size no longer makes every small request and reply
++     * allocate that much. 1024 is what small messages had before, when the
++     * buffer was always the fragment size and that defaulted to 1024.
++     */
++    private static final int INITIAL_BUFFER_SIZE = 1024;
++
+     // This will only apply for stand-alone java clients, since
+     // in the server the orb port comes from domain.xml, and in an appclient
+     // the port is set from the sun-acc.xml. It's set to the same
+@@ -302,7 +311,7 @@ final class OrbCreator {
+             } else {
+                 fragmentSize = String.valueOf(fsize);
+             }
+-            bufferSize = fragmentSize;
++            bufferSize = String.valueOf(Math.min(Integer.parseInt(fragmentSize), INITIAL_BUFFER_SIZE));
+         } catch (NumberFormatException nfe) {
+             LOG.log(WARNING, "The message fragment size {0} must be an integer, using default value {1} instead.",
+                 fragmentSize, SUN_GIOP_DEFAULT_FRAGMENT_SIZE);
+-- 
+2.34.1
+
