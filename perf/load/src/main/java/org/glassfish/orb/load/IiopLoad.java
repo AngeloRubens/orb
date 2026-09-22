@@ -39,7 +39,10 @@ import org.glassfish.orb.baseline.Values;
  */
 public final class IiopLoad {
 
-    private static final String NAME = "java:global/orb-baseline-bean/GreeterBean!" + Greeter.class.getName();
+    // GreeterBean (stateless, container managed transactions), GreeterBmtBean
+    // (no transaction per call) or GreeterSingletonBean (no pool either).
+    private static final String BEAN = System.getProperty("bean", "GreeterBean");
+    private static final String NAME = "java:global/orb-baseline-bean/" + BEAN + "!" + Greeter.class.getName();
 
     public static void main(String[] args) throws Exception {
         String scenario = System.getProperty("scenario", "all");
@@ -166,7 +169,7 @@ public final class IiopLoad {
             }
         }
         Arrays.sort(all, 0, pos);
-        System.out.printf("RESULT scenario=%s threads=%d seconds=%d calls=%d errors=%d throughput=%.0f/s "
+        System.out.printf("RESULT bean=" + BEAN + " scenario=%s threads=%d seconds=%d calls=%d errors=%d throughput=%.0f/s "
                 + "p50=%.3fms p90=%.3fms p99=%.3fms p999=%.3fms max=%.3fms%n",
                 label, threads, seconds, pos, errors.get(), pos / (double) seconds,
                 pct(all, pos, 0.50), pct(all, pos, 0.90), pct(all, pos, 0.99), pct(all, pos, 0.999),

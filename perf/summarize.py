@@ -27,7 +27,7 @@ SCENARIOS = {
     "large": "echoLarge: a 64 KB String each way",
 }
 
-line_re = re.compile(r"config=(\S+) round=(\d+) RESULT scenario=(\S+) .*? calls=(\d+) errors=(\d+) "
+line_re = re.compile(r"config=(\S+) round=(\d+) RESULT (?:bean=(\S+) )?scenario=(\S+) .*? calls=(\d+) errors=(\d+) "
                      r"throughput=(\d+)/s p50=([\d.,]+)ms p90=([\d.,]+)ms p99=([\d.,]+)ms")
 
 
@@ -41,11 +41,11 @@ for line in open(sys.argv[1]):
     m = line_re.search(line)
     if not m:
         continue
-    config, _, scenario, _, err, tput, p50, p90, p99 = m.groups()
+    config, _, bean, scenario, _, err, tput, p50, p90, p99 = m.groups()
     errors += int(err)
-    runs[(scenario, config)].append((float(tput), num(p50), num(p90), num(p99)))
+    runs[((bean or "GreeterBean"), scenario, config)].append((float(tput), num(p50), num(p90), num(p99)))
 
-configs = [c for c in CONFIGS if any(k[1] == c for k in runs)]
+configs = [c for c in CONFIGS if any(k[2] == c for k in runs)]
 out = ["## ORB before/after, same runner, same GlassFish install", ""]
 out.append("Median of the rounds. Throughput in calls/s (higher is better), latency in ms.")
 out.append("")
@@ -53,12 +53,18 @@ for c in configs:
     out.append(f"- **{c}**: {CONFIGS[c]}")
 out.append("")
 
-for sc, desc in SCENARIOS.items():
-    rows = [(c, runs[(sc, c)]) for c in configs if runs.get((sc, c))]
+BEANS = {
+    "GreeterBean": "stateless, container managed transactions",
+    "GreeterBmtBean": "stateless, bean managed transactions: no transaction per call",
+    "GreeterSingletonBean": "singleton, bean managed transactions and concurrency: no pool, no lock",
+}
+for bean, bdesc in BEANS.items():
+  for sc, desc in SCENARIOS.items():
+    rows = [(c, runs[(bean, sc, c)]) for c in configs if runs.get((bean, sc, c))]
     if not rows:
         continue
     med = {c: [statistics.median(x[i] for x in r) for i in range(4)] for c, r in rows}
-    out.append(f"### {sc}: {desc}")
+    out.append(f"### {bean} ({bdesc}) - {sc}: {desc}")
     out.append("")
     out.append("| config | calls/s | vs A | vs B | p50 | p90 | p99 | rounds |")
     out.append("|---|---:|---:|---:|---:|---:|---:|---:|")

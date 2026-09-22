@@ -19,6 +19,9 @@ on:
       scenarios:
         description: Scenarios
         default: "small graph large"
+      beans:
+        description: Beans (GreeterBean GreeterBmtBean GreeterSingletonBean)
+        default: "GreeterBean"
 
 env:
   GLASSFISH_VERSION: 8.0.4
@@ -151,6 +154,7 @@ jobs:
           OUT: ${{ github.workspace }}/results/compare.txt
           JFR_DIR: ${{ github.workspace }}/results/jfr
           SCENARIOS: ${{ inputs.scenarios || 'small graph large' }}
+          BEANS: ${{ inputs.beans || 'GreeterBean' }}
         run: |
           mkdir -p results
           perf/compare.sh "${{ inputs.rounds || '2' }}" ${{ inputs.configs || 'A B B64 C C64' }}
