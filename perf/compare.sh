@@ -8,7 +8,9 @@
 # Configs (jars are looked up in $JARS):
 #   A    GlassFish as released: its ORB, its orb-iiop, 1 KB fragments
 #   B    ORB master without these changes, released orb-iiop, 1 KB fragments
+#   B8   as B with 8 KB fragments, buffers as large as a fragment
 #   B64  as B with 64 KB fragments, buffers as large as a fragment
+#   C8   as C with 8 KB fragments, buffers starting at 1 KB
 #   C    ORB and orb-iiop with these changes, 1 KB fragments (the default)
 #   C64  as C with 64 KB fragments, buffers starting at 1 KB
 #   Cnq  as C but with internal-api from master: every change except the work queue
@@ -79,6 +81,10 @@ for r in $(seq 1 "$rounds"); do
             Cnq) install orb-patched.jar  internal-api-master.jar   orb-iiop-patched.jar  1024 ;;
             Bq)  install orb-master.jar   internal-api-patched.jar  orb-iiop-released.jar 1024 ;;
             Bltq) install orb-master.jar  internal-api-ltq.jar      orb-iiop-released.jar 1024 ;;
+            B8)  install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 8192
+                 client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=8192" ;;
+            C8)  install orb-patched.jar  internal-api-patched.jar  orb-iiop-patched.jar  8192
+                 client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
             Cnf) install orb-noinline.jar internal-api-patched.jar  orb-iiop-patched.jar  1024 ;;
             Cltq) install orb-patched.jar internal-api-ltq.jar      orb-iiop-patched.jar  1024 ;;
             C64ltq) install orb-patched.jar internal-api-ltq.jar    orb-iiop-patched.jar  65536
