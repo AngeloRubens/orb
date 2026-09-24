@@ -22,6 +22,9 @@ on:
       beans:
         description: Beans (GreeterBean GreeterBmtBean GreeterSingletonBean)
         default: "GreeterBean"
+      patched_ref:
+        description: Branch or SHA to build the changes under test from (empty: this branch)
+        default: ""
 
 env:
   GLASSFISH_VERSION: 8.0.4
@@ -83,11 +86,21 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build the ORB with these changes
+        env:
+          PATCHED_REF: ${{ inputs.patched_ref }}
         run: |
-          mvn install -DskipTests -pl internal-api,orbmain -am
           mkdir -p jars
-          cp orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar jars/orb-patched.jar
-          cp internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar jars/internal-api-patched.jar
+          # The harness lives on this branch; the changes under test may live
+          # on another, so that a pull request carries only ORB sources.
+          if [ -n "$PATCHED_REF" ]; then
+            git fetch -q origin "$PATCHED_REF"
+            git worktree add -q "$RUNNER_TEMP/orb-patched" FETCH_HEAD
+            echo "Changes under test: $PATCHED_REF $(git -C "$RUNNER_TEMP/orb-patched" log -1 --format='%h %s')" >> "$GITHUB_STEP_SUMMARY"
+            cd "$RUNNER_TEMP/orb-patched"
+          fi
+          mvn install -DskipTests -pl internal-api,orbmain -am
+          cp orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar "$GITHUB_WORKSPACE/jars/orb-patched.jar"
+          cp internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar "$GITHUB_WORKSPACE/jars/internal-api-patched.jar"
 
       - name: Build ORB master without these changes
         run: |
