@@ -23,7 +23,7 @@ on:
         description: Beans (GreeterBean GreeterBmtBean GreeterSingletonBean)
         default: "GreeterBean"
       patched_ref:
-        description: Branch or SHA to build the changes under test from (empty: this branch)
+        description: "Branch or SHA to build the changes under test from (empty means this branch)"
         default: ""
 
 env:
