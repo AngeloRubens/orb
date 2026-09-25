@@ -29,6 +29,15 @@ Each one sits on a place the encoding was changed.
 | `crosses-fragments` | a payload written across fragments at every size the job runs, where the buffer holding a partially read string is now reused rather than reallocated |
 | `cycle-survives`, `shared-identity` | references survive only if the indirection table maps them |
 | `large-graph` | a graph big enough to grow that table past its small-array mode, which is where its entries are re-linked |
+
+The last one is 200 nodes rather than the thousands it started as. The table
+leaves its small mode at nine entries, so 200 is already far past it and
+forces the hash table to grow several times; the reason not to go deeper is
+that a chain is written by recursing once per node, about eight frames each,
+and four thousand overflows the stack inside the value handler - on ORB
+master exactly as on the changes under test. That is what RMI-IIOP does with
+deeply linked values. It is worth knowing and it is a different measurement
+from this one, so `-DgraphNodes=` is left settable to make it deliberately.
 | `transient-*`, `application-exception`, `system-exception` | value semantics the encoding must not quietly change |
 
 ## Two kinds of check

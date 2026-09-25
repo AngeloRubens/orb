@@ -214,7 +214,17 @@ public final class IiopFidelity {
 
         // Past the point where the indirection table stops being a small
         // array and has to grow, which is where its entries are re-linked.
-        int nodes = Integer.getInteger("graphNodes", 4000);
+        // The table leaves its small mode at nine entries, so this is already
+        // far past it and forces the hash table to grow several times.
+        //
+        // Not deeper, and this is the interesting part: a chain is written by
+        // recursing once per node, about eight frames each, so a long enough
+        // one overflows the stack in the value handler. Four thousand did,
+        // and on ORB master exactly as on these changes - it is what RMI-IIOP
+        // does with deeply linked values, not something this branch changed.
+        // Measuring that limit is a different test from this one, and the
+        // property is here so it can be measured deliberately.
+        int nodes = Integer.getInteger("graphNodes", 200);
         Values.Node head = new Values.Node("n0");
         Values.Node tail = head;
         for (int i = 1; i < nodes; i++) {

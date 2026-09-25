@@ -51,11 +51,13 @@ run() {   # config fragment-size bean client-properties
     VMARGS="-Dbean=$3 $4" "$GF/glassfish/bin/appclient" -client "$CLIENT" > "$log" 2>&1
     local status=$?
     echo "--- $label"
-    grep -E '^(ok|note|FAIL|FIDELITY)' "$log" || {
-        echo "the client produced no checks; it said:"
-        grep -viE '^\s*$' "$log" | grep -iE 'exception|error|caused by' | head -15
-    }
+    grep -E '^(ok|note|FAIL|FIDELITY)' "$log"
     if [ $status -ne 0 ] || ! grep -q '^FIDELITY OK' "$log"; then
+        # Say why it stopped, not just how far it got. A client that dies
+        # halfway prints the checks it managed, and reading those alone is
+        # how a crash gets mistaken for a clean run with fewer cases.
+        echo "the client did not finish (exit $status); it said:"
+        grep -viE '^\s*$' "$log" | grep -iE 'exception|error|caused by' | head -5
         failed=1
     fi
     sleep 2
