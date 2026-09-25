@@ -15,5 +15,6 @@
     <modules>
         <module>bean</module>
         <module>load</module>
+        <module>fidelity</module>
     </modules>
 </project>

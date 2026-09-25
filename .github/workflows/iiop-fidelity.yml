@@ -1,0 +1,153 @@
+name: ORB fidelity over IIOP
+
+# Checks that what goes out over RMI-IIOP comes back unchanged, against a real
+# GlassFish, with the unchanged ORB and with these changes.
+#
+# The load comparison next door measures how fast the encoding runs and counts
+# errors; it cannot tell a wrong answer from a right one, because a call that
+# returned the wrong string still returned. The unit tests cover the encoding
+# in isolation, which is where a mistake is easiest to find and hardest to
+# trust: they exercise the CDR classes directly rather than a bean call
+# through a deployed application's classloader, across fragments, with the
+# indirection table that a real value graph builds.
+#
+# Two things have to hold. The client's own checks must pass, and the
+# transcript from ORB master must equal the transcript from these changes -
+# including the cases the client only reports, such as a lone surrogate, where
+# the right answer is whatever this ORB has always done.
+
+on:
+  push:
+    branches: [ perf/ci ]
+  workflow_dispatch:
+    inputs:
+      configs:
+        description: Configurations (A released, B master, C these changes)
+        default: "B C"
+      fragments:
+        description: Fragment sizes to run every configuration at
+        default: "1024 65536"
+      beans:
+        description: Beans (GreeterBean GreeterBmtBean GreeterSingletonBean)
+        default: "GreeterBean"
+      patched_ref:
+        description: "Branch or SHA to build the changes under test from (empty means this branch)"
+        default: ""
+
+env:
+  GLASSFISH_VERSION: 8.0.4
+  MAVEN_ARGS: -B -ntp
+
+jobs:
+  fidelity:
+    name: Value fidelity (build JDK 21, run JRE 25)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 25 (to run)
+        id: run-jdk
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - name: Set up JDK 21 (to build)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build the ORB with these changes
+        env:
+          PATCHED_REF: ${{ inputs.patched_ref }}
+        run: |
+          mkdir -p jars
+          # The harness lives on this branch; the changes under test may live
+          # on another, so that a pull request carries only ORB sources.
+          if [ -n "$PATCHED_REF" ]; then
+            git fetch -q origin "$PATCHED_REF"
+            git worktree add -q "$RUNNER_TEMP/orb-patched" FETCH_HEAD
+            echo "Changes under test: $PATCHED_REF $(git -C "$RUNNER_TEMP/orb-patched" log -1 --format='%h %s')" >> "$GITHUB_STEP_SUMMARY"
+            cd "$RUNNER_TEMP/orb-patched"
+          fi
+          mvn install -DskipTests -pl internal-api,orbmain -am
+          cp orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar "$GITHUB_WORKSPACE/jars/orb-patched.jar"
+          cp internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar "$GITHUB_WORKSPACE/jars/internal-api-patched.jar"
+
+      - name: Build ORB master without these changes
+        run: |
+          git clone -q --depth 1 https://github.com/eclipse-ee4j/orb.git "$RUNNER_TEMP/orb-master"
+          echo "ORB master: $(git -C "$RUNNER_TEMP/orb-master" log -1 --format='%h %s')" >> "$GITHUB_STEP_SUMMARY"
+          (cd "$RUNNER_TEMP/orb-master" && mvn install -DskipTests -pl internal-api,orbmain -am)
+          cp "$RUNNER_TEMP"/orb-master/orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar jars/orb-master.jar
+          cp "$RUNNER_TEMP"/orb-master/internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar jars/internal-api-master.jar
+
+      - name: Build orb-iiop ${{ env.GLASSFISH_VERSION }} with the GlassFish changes
+        run: |
+          git clone -q --depth 1 --branch "$GLASSFISH_VERSION" https://github.com/eclipse-ee4j/glassfish.git "$RUNNER_TEMP/glassfish"
+          cd "$RUNNER_TEMP/glassfish"
+          git apply "$GITHUB_WORKSPACE"/perf/gf-patches/*.patch
+          mvn package -DskipTests -pl appserver/orb/orb-iiop
+          cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-patched.jar"
+
+      - name: Install GlassFish ${{ env.GLASSFISH_VERSION }}
+        run: |
+          curl -sSL -o "$RUNNER_TEMP/glassfish.zip" \
+            "https://github.com/eclipse-ee4j/glassfish/releases/download/${GLASSFISH_VERSION}/glassfish-${GLASSFISH_VERSION}.zip"
+          unzip -q "$RUNNER_TEMP/glassfish.zip" -d "$RUNNER_TEMP/gf"
+          M="$RUNNER_TEMP/gf/glassfish8/glassfish/modules"
+          cp "$M/glassfish-corba-orb.jar" jars/orb-released.jar
+          cp "$M/glassfish-corba-internal-api.jar" jars/internal-api-released.jar
+          cp "$M/orb-iiop.jar" jars/orb-iiop-released.jar
+          ls -l jars
+
+      - name: Build the test bean and the fidelity client
+        run: mvn package -f perf/pom.xml
+
+      - name: Deploy the test bean
+        env:
+          JAVA_HOME: ${{ steps.run-jdk.outputs.path }}
+          AS_JAVA: ${{ steps.run-jdk.outputs.path }}
+        run: |
+          GF="$RUNNER_TEMP/gf/glassfish8"
+          "$GF/bin/asadmin" start-domain
+          "$GF/bin/asadmin" deploy perf/bean/target/orb-baseline-bean.jar
+          "$GF/bin/asadmin" stop-domain
+
+      - name: Check fidelity
+        env:
+          GF: ${{ runner.temp }}/gf/glassfish8
+          JARS: ${{ github.workspace }}/jars
+          CLIENT: ${{ github.workspace }}/perf/fidelity/target/orb-fidelity-client.jar
+          RUN_JAVA: ${{ steps.run-jdk.outputs.path }}
+          OUT_DIR: ${{ github.workspace }}/results/fidelity
+          FRAGMENTS: ${{ inputs.fragments || '1024 65536' }}
+          BEANS: ${{ inputs.beans || 'GreeterBean' }}
+        run: |
+          # Without pipefail the exit status would be tee's, and a failing
+          # check would pass the job.
+          set -o pipefail
+          mkdir -p results
+          perf/fidelity.sh ${{ inputs.configs || 'B C' }} | tee results/fidelity.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Fidelity"
+            echo '```'
+            cat results/fidelity.txt 2>/dev/null || echo "no transcript"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Transcripts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fidelity-transcripts
+          path: results/**
