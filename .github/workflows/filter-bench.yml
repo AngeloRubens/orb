@@ -1,0 +1,44 @@
+name: Surrogate filter microbenchmark
+
+# The filter is the top entry of the server profile on large calls. This
+# measures the shipped form against plainer ones, because hand-unrolling can
+# stop C2 vectorising a reduction it would otherwise handle.
+#
+# A microbenchmark decides which variant to try, not whether it is worth
+# shipping: that is for the load comparison next door, on the same runner.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ 'perf/ci' ]
+    paths: [ 'perf/filter/**', '.github/workflows/filter-bench.yml' ]
+
+jobs:
+  bench:
+    name: Filter variants (JDK 21)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Runner
+        run: |
+          nproc; lscpu | grep -E 'Model name|Flags' | head -2 | cut -c1-200
+      - name: Build
+        run: mvn -B -ntp -q package -f perf/filter/pom.xml
+      - name: Run
+        run: java -jar perf/filter/target/benchmarks.jar -rf text -rff perf/filter/result.txt
+      - name: Result
+        if: always()
+        run: |
+          {
+            echo '### Surrogate filter'
+            echo '```'
+            cat perf/filter/result.txt 2>/dev/null || echo 'no result'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat perf/filter/result.txt 2>/dev/null || true
