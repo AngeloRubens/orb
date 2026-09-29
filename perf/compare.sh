@@ -16,6 +16,8 @@
 #   Cnq  as C but with internal-api from master: every change except the work queue
 #   Bq   as B but with internal-api with these changes: only the work queue
 #   Bltq as B with the work queue as first rewritten, on LinkedTransferQueue
+#   Cb   as C but with the ORB built from the workflow's baseline_ref: the
+#        change under test against the stack under it, rather than master
 #   Cnf  as C but without processing the next fragment inline
 #   Cltq as C but with the work queue on LinkedTransferQueue
 #   C64ltq as C64 but with the work queue on LinkedTransferQueue
@@ -34,10 +36,19 @@ export JAVA_HOME=$RUN_JAVA AS_JAVA=$RUN_JAVA
 mkdir -p "$JFR_DIR"
 
 install() {   # orb internal-api orb-iiop fragment-size
+    # Checked before anything is stopped. A jar that was never built - a
+    # configuration asked for without the workflow input that produces its
+    # jar - would otherwise leave the previous configuration's jar in the
+    # modules directory, and the run would measure that one again under this
+    # configuration's name.
+    local jar
+    for jar in "$1" "$2" "$3"; do
+        [ -f "$JARS/$jar" ] || { echo "$JARS/$jar was not built"; return 1; }
+    done
     "$GF/bin/asadmin" stop-domain >/dev/null 2>&1
-    cp "$JARS/$1" "$MOD/glassfish-corba-orb.jar"
-    cp "$JARS/$2" "$MOD/glassfish-corba-internal-api.jar"
-    cp "$JARS/$3" "$MOD/orb-iiop.jar"
+    cp "$JARS/$1" "$MOD/glassfish-corba-orb.jar" || return 1
+    cp "$JARS/$2" "$MOD/glassfish-corba-internal-api.jar" || return 1
+    cp "$JARS/$3" "$MOD/orb-iiop.jar" || return 1
     rm -rf "$GF/glassfish/domains/domain1/osgi-cache"
     "$GF/bin/asadmin" start-domain >/dev/null || return 1
     "$GF/bin/asadmin" set configs.config.server-config.iiop-service.orb.message-fragment-size=$4 >/dev/null
@@ -85,6 +96,7 @@ for r in $(seq 1 "$rounds"); do
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=8192" ;;
             C8)  install orb-patched.jar  internal-api-patched.jar  orb-iiop-patched.jar  8192
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
+            Cb)  install orb-baseline.jar internal-api-baseline.jar orb-iiop-patched.jar  1024 ;;
             Cnf) install orb-noinline.jar internal-api-patched.jar  orb-iiop-patched.jar  1024 ;;
             Cltq) install orb-patched.jar internal-api-ltq.jar      orb-iiop-patched.jar  1024 ;;
             C64ltq) install orb-patched.jar internal-api-ltq.jar    orb-iiop-patched.jar  65536

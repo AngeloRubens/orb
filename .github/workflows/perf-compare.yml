@@ -25,6 +25,9 @@ on:
       patched_ref:
         description: "Branch or SHA to build the changes under test from (empty means this branch)"
         default: ""
+      baseline_ref:
+        description: "Branch or SHA for config Cb, to measure one change against the stack under it (empty skips it)"
+        default: ""
 
 env:
   GLASSFISH_VERSION: 8.0.4
@@ -102,6 +105,22 @@ jobs:
           cp orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar "$GITHUB_WORKSPACE/jars/orb-patched.jar"
           cp internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar "$GITHUB_WORKSPACE/jars/internal-api-patched.jar"
 
+      - name: Build the ORB at the baseline ref
+        # The changes under test sit on a stack of earlier ones, and against
+        # master the newest change is a few percent inside the sum of all of
+        # them. Naming its parent here gives config Cb, which differs from C by
+        # that one change and nothing else.
+        if: ${{ inputs.baseline_ref != '' }}
+        env:
+          BASELINE_REF: ${{ inputs.baseline_ref }}
+        run: |
+          git fetch -q origin "$BASELINE_REF"
+          git worktree add -q "$RUNNER_TEMP/orb-baseline" FETCH_HEAD
+          echo "Baseline (config Cb): $BASELINE_REF $(git -C "$RUNNER_TEMP/orb-baseline" log -1 --format='%h %s')" >> "$GITHUB_STEP_SUMMARY"
+          (cd "$RUNNER_TEMP/orb-baseline" && mvn install -DskipTests -pl internal-api,orbmain -am)
+          cp "$RUNNER_TEMP"/orb-baseline/orbmain/target/glassfish-corba-orb-*-SNAPSHOT.jar jars/orb-baseline.jar
+          cp "$RUNNER_TEMP"/orb-baseline/internal-api/target/glassfish-corba-internal-api-*-SNAPSHOT.jar jars/internal-api-baseline.jar
+
       - name: Build ORB master without these changes
         run: |
           git clone -q --depth 1 https://github.com/eclipse-ee4j/orb.git "$RUNNER_TEMP/orb-master"
@@ -119,6 +138,10 @@ jobs:
           cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-patched.jar"
 
       - name: Build the work queue as first rewritten, on LinkedTransferQueue
+        # Only Bltq, Cltq and C64ltq install this jar. Building it for a run
+        # that asked for none of them is four minutes of the runner spent on
+        # a jar the comparison never loads.
+        if: ${{ contains(inputs.configs || 'A B B64 C C64', 'ltq') }}
         run: |
           git worktree add -q "$RUNNER_TEMP/orb-ltq" "$LTQ_COMMIT"
           (cd "$RUNNER_TEMP/orb-ltq" && mvn install -DskipTests -pl internal-api -am)
@@ -127,6 +150,7 @@ jobs:
           LTQ_COMMIT: a81e2b94
 
       - name: Build the ORB with every change except inline fragment processing
+        if: ${{ contains(inputs.configs || 'A B B64 C C64', 'Cnf') }}
         run: |
           git worktree add -q "$RUNNER_TEMP/orb-noinline" "$NOINLINE_COMMIT"
           (cd "$RUNNER_TEMP/orb-noinline" && mvn install -DskipTests -pl orbmain -am)
