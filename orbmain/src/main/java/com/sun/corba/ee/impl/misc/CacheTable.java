@@ -39,17 +39,32 @@ import com.sun.corba.ee.spi.trace.Cdr;
 public class CacheTable<K> {
     private static final ORBUtilSystemException wrapper = ORBUtilSystemException.self;
 
-    private class Entry<K> {
-        private K key;
-        private int val;
+    /**
+     * Static, and holding the mixed hashes rather than only the key.
+     *
+     * <p>Static because an inner class carries a reference to the table that
+     * made it, which is a field per entry that nothing reads, and because its
+     * own type parameter shadowed the table's.
+     *
+     * <p>The hashes are kept because a resize would otherwise ask
+     * System.identityHashCode for every key again. That call is not free: the
+     * first one for an object computes a value and writes it into the object's
+     * header. Mixing is deterministic, so a stored hash only has to be masked
+     * again for the new table size.
+     */
+    private static final class Entry<K> {
+        private final K key;
+        private final int val;
+        private final int keyHash;
+        private final int valHash;
         private Entry<K> next; // this chains the collision list of table "map"
         private Entry<K> rnext; // this chains the collision list of table "rmap"
 
-        public Entry(K k, int v) {
+        Entry(K k, int v, int keyHash, int valHash) {
             key = k;
             val = v;
-            next = null;
-            rnext = null;
+            this.keyHash = keyHash;
+            this.valHash = valHash;
         }
     }
 
@@ -135,11 +150,15 @@ public class CacheTable<K> {
         for (int i = 0; i < oldSize; i++) {
             for (Entry<K> e = oldMap[i]; e != null;) {
                 Entry<K> next = e.next;
-                int index = hash(e.key);
+                // Masked again rather than rehashed: the mixed value does not
+                // depend on the table size, and asking for the identity hash
+                // of every key on every resize is what made this loop show up
+                // in a profile.
+                int index = e.keyHash & (size - 1);
                 e.next = map[index];
                 map[index] = e;
                 if (!noReverseMap) {
-                    int rindex = hash(e.val);
+                    int rindex = e.valHash & (size - 1);
                     e.rnext = rmap[rindex];
                     rmap[rindex] = e;
                 }
@@ -148,14 +167,22 @@ public class CacheTable<K> {
         }
     }
 
-    private int hashModTableSize(int h) {
+    /**
+     * The mixing half, without the table size. Kept apart so that a stored
+     * hash can be masked again after a resize instead of being recomputed.
+     */
+    private static int mix(int h) {
         // This is taken from the hash method in the JDK 6 HashMap.
         // This is used for both the
         // key and the value side of the mapping. It's not clear
         // how useful this is in this application, as the low-order
         // bits change a lot for both sides.
         h ^= (h >>> 20) ^ (h >>> 12);
-        return (h ^ (h >>> 7) ^ (h >>> 4)) & (size - 1);
+        return h ^ (h >>> 7) ^ (h >>> 4);
+    }
+
+    private int hashModTableSize(int h) {
+        return mix(h) & (size - 1);
     }
 
     private int hash(K key) {
@@ -225,11 +252,12 @@ public class CacheTable<K> {
     }
 
     private void insert(int index, K key, int val) {
-        Entry<K> newEntry = new Entry<K>(key, val);
+        int keyHash = mix(System.identityHashCode(key));
+        Entry<K> newEntry = new Entry<K>(key, val, keyHash, mix(val));
         newEntry.next = map[index];
         map[index] = newEntry;
         if (!noReverseMap) {
-            int rindex = hash(val);
+            int rindex = newEntry.valHash & (size - 1);
             newEntry.rnext = rmap[rindex];
             rmap[rindex] = newEntry;
         }
