@@ -6,6 +6,10 @@
 
 package bench;
 
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.VarHandle;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.concurrent.TimeUnit;
 
 import org.openjdk.jmh.annotations.Benchmark;
@@ -43,10 +47,16 @@ import org.openjdk.jmh.annotations.Warmup;
 @Fork(2)
 public class SurrogateFilter {
 
+    static final VarHandle LONG_BE =
+            MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.BIG_ENDIAN);
+
     @Param({"64", "1024", "65536"})
     int length;
 
     char[] chars;
+
+    /** The same run as bytes, which is the shape the read path already has. */
+    byte[] bytes;
 
     @Setup
     public void setup() {
@@ -55,17 +65,23 @@ public class SurrogateFilter {
         for (int i = 0; i < length; i++) {
             chars[i] = alphabet.charAt(i % alphabet.length());
         }
+        bytes = new byte[length * 2];
+        ByteBuffer.wrap(bytes).asCharBuffer().put(chars);
         // Equivalence, checked rather than assumed: no surrogate present.
-        if (unrolled4() || singleAccumulator() || maxReduction() || orRaw()) {
+        if (unrolled4() || singleAccumulator() || maxReduction() || orRaw()
+                || swarBytes() || swarBytesTopBit()) {
             throw new AssertionError("false positive on a clean run");
         }
         // And with one, at the far end, where a filter that stops early would miss it.
         char keep = chars[length - 1];
         chars[length - 1] = '\uD800';
-        if (!unrolled4() || !singleAccumulator() || !maxReduction() || !orRaw()) {
+        ByteBuffer.wrap(bytes).asCharBuffer().put(chars);
+        if (!unrolled4() || !singleAccumulator() || !maxReduction() || !orRaw()
+                || !swarBytes() || !swarBytesTopBit()) {
             throw new AssertionError("missed a surrogate");
         }
         chars[length - 1] = keep;
+        ByteBuffer.wrap(bytes).asCharBuffer().put(chars);
     }
 
     /** What the branch ships today: four accumulators, stride of four. */
@@ -119,5 +135,57 @@ public class SurrogateFilter {
             or |= a[i];
         }
         return or >= 0xD800;
+    }
+
+    /**
+     * SWAR on four code units at a time. The lanes are split into two halves
+     * so that the carry out of one cannot reach its neighbour: each 32-bit
+     * half then holds one lane in its low sixteen bits, and adding 0x2800
+     * carries into bit 16 exactly when that lane is at or above U+D800.
+     */
+    @Benchmark
+    public boolean swarBytes() {
+        byte[] b = bytes;
+        long acc = 0;
+        int i = 0;
+        int full = b.length & ~7;
+        for (; i < full; i += 8) {
+            long x = (long) LONG_BE.get(b, i);
+            long lo = x & 0x0000FFFF0000FFFFL;
+            long hi = (x >>> 16) & 0x0000FFFF0000FFFFL;
+            acc |= (lo + 0x0000280000002800L) | (hi + 0x0000280000002800L);
+        }
+        if ((acc & 0x0001000000010000L) != 0) {
+            return true;
+        }
+        for (; i < b.length; i += 2) {
+            int c = ((b[i] & 0xFF) << 8) | (b[i + 1] & 0xFF);
+            if (c >= 0xD800) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Conservative and cheaper: one AND per four code units, no adds. */
+    @Benchmark
+    public boolean swarBytesTopBit() {
+        byte[] b = bytes;
+        long acc = 0;
+        int i = 0;
+        int full = b.length & ~7;
+        for (; i < full; i += 8) {
+            acc |= (long) LONG_BE.get(b, i);
+        }
+        if ((acc & 0x8000800080008000L) != 0) {
+            return true;
+        }
+        for (; i < b.length; i += 2) {
+            int c = ((b[i] & 0xFF) << 8) | (b[i + 1] & 0xFF);
+            if (c >= 0xD800) {
+                return true;
+            }
+        }
+        return false;
     }
 }
