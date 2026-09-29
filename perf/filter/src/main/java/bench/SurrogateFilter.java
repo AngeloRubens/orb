@@ -7,6 +7,7 @@
 package bench;
 
 import java.lang.invoke.MethodHandles;
+import java.lang.reflect.Field;
 import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -50,6 +51,25 @@ public class SurrogateFilter {
     static final VarHandle LONG_BE =
             MethodHandles.byteArrayViewVarHandle(long[].class, ByteOrder.BIG_ENDIAN);
 
+    /**
+     * The ORB already reaches memory this way, through pfl's Bridge; this is
+     * the same access without dragging that dependency into a benchmark.
+     * Reading four code units as one word is the only shape that drops into
+     * both call sites, since both hold a char[] rather than the wire bytes.
+     */
+    static final sun.misc.Unsafe UNSAFE = unsafe();
+    static final long CHARS_BASE = UNSAFE.arrayBaseOffset(char[].class);
+
+    private static sun.misc.Unsafe unsafe() {
+        try {
+            Field f = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            f.setAccessible(true);
+            return (sun.misc.Unsafe) f.get(null);
+        } catch (ReflectiveOperationException e) {
+            throw new ExceptionInInitializerError(e);
+        }
+    }
+
     @Param({"64", "1024", "65536"})
     int length;
 
@@ -69,7 +89,7 @@ public class SurrogateFilter {
         ByteBuffer.wrap(bytes).asCharBuffer().put(chars);
         // Equivalence, checked rather than assumed: no surrogate present.
         if (unrolled4() || singleAccumulator() || maxReduction() || orRaw()
-                || swarBytes() || swarBytesTopBit()) {
+                || swarBytes() || swarBytesTopBit() || swarChars() || swarCharsTopBit()) {
             throw new AssertionError("false positive on a clean run");
         }
         // And with one, at the far end, where a filter that stops early would miss it.
@@ -77,7 +97,7 @@ public class SurrogateFilter {
         chars[length - 1] = '\uD800';
         ByteBuffer.wrap(bytes).asCharBuffer().put(chars);
         if (!unrolled4() || !singleAccumulator() || !maxReduction() || !orRaw()
-                || !swarBytes() || !swarBytesTopBit()) {
+                || !swarBytes() || !swarBytesTopBit() || !swarChars() || !swarCharsTopBit()) {
             throw new AssertionError("missed a surrogate");
         }
         chars[length - 1] = keep;
@@ -183,6 +203,51 @@ public class SurrogateFilter {
         for (; i < b.length; i += 2) {
             int c = ((b[i] & 0xFF) << 8) | (b[i + 1] & 0xFF);
             if (c >= 0xD800) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The exact lane test, over a char[] read four code units at a time. */
+    @Benchmark
+    public boolean swarChars() {
+        char[] a = chars;
+        long acc = 0;
+        int i = 0;
+        int full = a.length & ~3;
+        for (; i < full; i += 4) {
+            long x = UNSAFE.getLong(a, CHARS_BASE + (long) i * 2);
+            long lo = x & 0x0000FFFF0000FFFFL;
+            long hi = (x >>> 16) & 0x0000FFFF0000FFFFL;
+            acc |= (lo + 0x0000280000002800L) | (hi + 0x0000280000002800L);
+        }
+        if ((acc & 0x0001000000010000L) != 0) {
+            return true;
+        }
+        for (; i < a.length; i++) {
+            if (a[i] >= 0xD800) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Conservative over a char[]: one AND per four code units. */
+    @Benchmark
+    public boolean swarCharsTopBit() {
+        char[] a = chars;
+        long acc = 0;
+        int i = 0;
+        int full = a.length & ~3;
+        for (; i < full; i += 4) {
+            acc |= UNSAFE.getLong(a, CHARS_BASE + (long) i * 2);
+        }
+        if ((acc & 0x8000800080008000L) != 0) {
+            return true;
+        }
+        for (; i < a.length; i++) {
+            if (a[i] >= 0xD800) {
                 return true;
             }
         }

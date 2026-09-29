@@ -31,7 +31,11 @@ jobs:
       - name: Build
         run: mvn -B -ntp -q package -f perf/filter/pom.xml
       - name: Run
-        run: java -jar perf/filter/target/benchmarks.jar -rf text -rff perf/filter/result.txt
+        run: |
+          # sun.misc.Unsafe is what the ORB already uses through pfl's Bridge;
+          # the warning would otherwise bury the results.
+          java --add-opens java.base/jdk.internal.misc=ALL-UNNAMED \
+            -jar perf/filter/target/benchmarks.jar -rf text -rff perf/filter/result.txt
       - name: Result
         if: always()
         run: |
