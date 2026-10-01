@@ -47,8 +47,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
-import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -2712,19 +2712,75 @@ public class IIOPInputStream extends com.sun.corba.ee.impl.io.InputStreamHook {
      * previously seen (and completely deserialized) in the stream.
      */
     static class ActiveRecursionManager {
-        private Map<Integer, Object> offsetToObjectMap;
+        // An open addressing map from offset to object, in two arrays. It
+        // was a HashMap<Integer, Object>, which for every object read
+        // allocated a node and, past the small integer cache, a boxed
+        // offset: a profile of a 50 node list put this map at 14% of the
+        // bytes the server allocated. The entries are the objects still
+        // being read, so they come and go with the nesting, and removal
+        // shifts the following entries back rather than leaving markers.
+        private static final int NO_OFFSET = Integer.MIN_VALUE; // offsets are never negative
+        private static final int INITIAL_CAPACITY = 16; // a power of 2, kept at most half full
+
+        private int[] offsets;
+        private Object[] objects; // null values are allowed, as they were in the HashMap
+        private int size;
 
         public ActiveRecursionManager() {
-            // A hash map is unsynchronized and allows
-            // null values
-            offsetToObjectMap = new HashMap<Integer, Object>();
+            offsets = newOffsets(INITIAL_CAPACITY);
+            objects = new Object[INITIAL_CAPACITY];
+        }
+
+        private static int[] newOffsets(int capacity) {
+            int[] result = new int[capacity];
+            Arrays.fill(result, NO_OFFSET);
+            return result;
+        }
+
+        private static int slot(int offset, int mask) {
+            // Offsets are mostly multiples of 4 or 8; spread them.
+            int h = offset * 0x9E3779B9;
+            return (h ^ (h >>> 16)) & mask;
+        }
+
+        /** The slot holding offset, or the empty slot where it would go. */
+        private int find(int offset) {
+            int mask = offsets.length - 1;
+            int i = slot(offset, mask);
+            while (offsets[i] != NO_OFFSET && offsets[i] != offset) {
+                i = (i + 1) & mask;
+            }
+            return i;
         }
 
         // Called right after allocating a new object.
         // Offset is the starting position in the stream
         // of the object.
         public void addObject(int offset, Object value) {
-            offsetToObjectMap.put(offset, value);
+            int i = find(offset);
+            if (offsets[i] == NO_OFFSET) {
+                if (size + 1 > offsets.length >>> 1) {
+                    grow();
+                    i = find(offset);
+                }
+                offsets[i] = offset;
+                size++;
+            }
+            objects[i] = value;
+        }
+
+        private void grow() {
+            int[] oldOffsets = offsets;
+            Object[] oldObjects = objects;
+            offsets = newOffsets(oldOffsets.length << 1);
+            objects = new Object[oldOffsets.length << 1];
+            for (int j = 0; j < oldOffsets.length; j++) {
+                if (oldOffsets[j] != NO_OFFSET) {
+                    int i = find(oldOffsets[j]);
+                    offsets[i] = oldOffsets[j];
+                    objects[i] = oldObjects[j];
+                }
+            }
         }
 
         // If the given starting position doesn't refer
@@ -2733,13 +2789,11 @@ public class IIOPInputStream extends com.sun.corba.ee.impl.io.InputStreamHook {
         // Otherwise, it returns a reference to the
         // object.
         public Object getObject(int offset) throws IOException {
-            Integer position = offset;
-
-            if (!offsetToObjectMap.containsKey(position)) {
+            int i = find(offset);
+            if (offsets[i] == NO_OFFSET) {
                 throw new IOException("Invalid indirection to offset " + offset);
             }
-
-            return offsetToObjectMap.get(position);
+            return objects[i];
         }
 
         // Called when an object has been completely
@@ -2747,14 +2801,31 @@ public class IIOPInputStream extends com.sun.corba.ee.impl.io.InputStreamHook {
         // this mapping. The CDR level can handle
         // further indirections.
         public void removeObject(int offset) {
-            offsetToObjectMap.remove(offset);
+            int i = find(offset);
+            if (offsets[i] == NO_OFFSET) {
+                return;
+            }
+            size--;
+            // Move back every following entry of the run that the hole would
+            // otherwise cut off from its home slot.
+            int mask = offsets.length - 1;
+            for (int j = (i + 1) & mask; offsets[j] != NO_OFFSET; j = (j + 1) & mask) {
+                int home = slot(offsets[j], mask);
+                if (((j - home) & mask) >= ((j - i) & mask)) {
+                    offsets[i] = offsets[j];
+                    objects[i] = objects[j];
+                    i = j;
+                }
+            }
+            offsets[i] = NO_OFFSET;
+            objects[i] = null;
         }
 
         // If the given offset doesn't map to an Object,
         // then it isn't an indirection to an object
         // currently being deserialized.
         public boolean containsObject(int offset) {
-            return offsetToObjectMap.containsKey(offset);
+            return offsets[find(offset)] != NO_OFFSET;
         }
     }
 }
