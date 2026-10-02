@@ -226,6 +226,11 @@ jobs:
         if: always()
         run: |
           if [ -f results/compare.txt ]; then
+            # Allocation and collections per recording, for the summary.
+            for f in results/jfr/server-*.jfr; do
+              [ -f "$f" ] || continue
+              echo "$(basename "$f" .jfr) $(java perf/HeapAlloc.java "$f")"
+            done > results/heap.txt
             python3 perf/summarize.py results/compare.txt | tee results/summary.md >> "$GITHUB_STEP_SUMMARY"
           fi
 

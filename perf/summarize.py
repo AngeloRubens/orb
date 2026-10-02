@@ -8,6 +8,7 @@ measured). When the lines carry the server's CPU use, also its median in cores
 and in CPU microseconds per call, the latter relative to Cb or else to B: less
 is better, and it depends far less on the runner than throughput.
 """
+import os
 import re
 import statistics
 import sys
@@ -64,6 +65,27 @@ for line in open(sys.argv[1]):
         io_runs[((bean or "GreeterBean"), scenario, config)].append(tuple(float(g) for g in io.groups()))
     runs[((bean or "GreeterBean"), scenario, config)].append((float(tput), num(p50), num(p90), num(p99), cores, us))
 
+# results/heap.txt, when the workflow wrote it: one line per server recording,
+# "server-<config>-r<round>-<scenario>-<bean> allocatedBytes=.. gcs=.. pauseMs=..",
+# counted exactly from the heap summaries. Divided by the calls of that round.
+calls_of = {}
+for line in open(sys.argv[1]):
+    m = re.search(r"config=(\S+) round=(\d+) RESULT (?:bean=(\S+) )?scenario=(\S+) .*? calls=(\d+)", line)
+    if m:
+        c, r, b, sc, n = m.groups()
+        calls_of[(b or "GreeterBean", sc, c, r)] = int(n)
+heap_runs = defaultdict(list)
+heap_file = os.path.join(os.path.dirname(sys.argv[1]), "heap.txt")
+if os.path.exists(heap_file):
+    for line in open(heap_file):
+        m = re.match(r"server-(\S+?)-r(\d+)-(\w+)-(\S+) allocatedBytes=(\d+) gcs=(\d+) pauseMs=([\d.]+)", line)
+        if not m:
+            continue
+        c, r, sc, b, alloc, gcs, pause = m.groups()
+        n = calls_of.get((b, sc, c, r))
+        if n:
+            heap_runs[(b, sc, c)].append((int(alloc) / n, int(gcs) * 1000 / n, float(pause) * 1000 / n))
+
 configs = [c for c in CONFIGS if any(k[2] == c for k in runs)]
 out = ["## ORB before/after, same runner, same GlassFish install", ""]
 out.append("Median of the rounds. Throughput in calls/s (higher is better), latency in ms. "
@@ -108,6 +130,19 @@ for bean, bdesc in BEANS.items():
             row += f" {cores:.2f} | {us:.1f} | {rel} |" if us is not None else " | | |"
         out.append(row + f" {len(r)} |")
     out.append("")
+    heap_rows = [(c, heap_runs[(bean, sc, c)]) for c in configs if heap_runs.get((bean, sc, c))]
+    if heap_rows:
+        ref = "Cb" if any(c == "Cb" for c, _ in heap_rows) else ("B" if any(c == "B" for c, _ in heap_rows) else None)
+        heap_med = {c: [statistics.median(x[i] for x in r) for i in range(3)] for c, r in heap_rows}
+        out.append("Server allocation and collections per call (median of the rounds), counted from the heap summaries.")
+        out.append("")
+        out.append(f"| config | bytes allocated | vs {ref} | collections per 1000 calls | vs {ref} | GC pause per call |")
+        out.append("|---|---:|---:|---:|---:|---:|")
+        for c, r in heap_rows:
+            a, g, p = heap_med[c]
+            rel = lambda i: f"{(heap_med[c][i] / heap_med[ref][i] - 1) * 100:+.0f}%" if ref and c != ref and heap_med[ref][i] else ""
+            out.append(f"| {c} | {a:,.0f} | {rel(0)} | {g:.2f} | {rel(1)} | {p:.1f} µs |")
+        out.append("")
     io_rows = [(c, io_runs[(bean, sc, c)]) for c in configs if io_runs.get((bean, sc, c))]
     if io_rows:
         out.append("Server I/O per call (median of the rounds): system calls and bytes.")
