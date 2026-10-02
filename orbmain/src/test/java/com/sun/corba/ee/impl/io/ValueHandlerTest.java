@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation
  * Copyright (c) 2016, 2020 Oracle and/or its affiliates.
  *
  * This program and the accompanying materials are made available under the
@@ -64,6 +65,28 @@ public class ValueHandlerTest extends ValueTestBase {
         writeStringValue_1_2("This, too!");
 
         assertThat(readWithValueHandler(String.class), equalTo("This, too!"));
+    }
+
+    @Test
+    public void theBridgeOnTheStreamIsClearedOnceTheValueIsRead() throws IOException {
+        writeStringValue_1_2("Once");
+
+        assertThat(readWithValueHandler(String.class), equalTo("Once"));
+        Assert.assertNull(getInputObject().getValueHandlerOwner());
+        Assert.assertNull(getInputObject().getValueHandlerBridge());
+    }
+
+    @Test
+    public void aStreamAnotherHandlerIsUsingIsLeftToIt() throws IOException {
+        writeStringValue_1_2("Shared");
+        setMessageBody(getGeneratedBody());
+        Object otherHandler = new Object();
+        Object otherBridge = new Object();
+        getInputObject().setValueHandlerBridge(otherHandler, otherBridge);
+
+        assertThat(readWithValueHandler(String.class), equalTo("Shared"));
+        Assert.assertSame(otherHandler, getInputObject().getValueHandlerOwner());
+        Assert.assertSame(otherBridge, getInputObject().getValueHandlerBridge());
     }
 
     @SuppressWarnings("unchecked")

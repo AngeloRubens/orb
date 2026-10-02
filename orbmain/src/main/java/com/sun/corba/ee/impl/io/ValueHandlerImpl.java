@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation
  * Copyright (c) 1997, 2020 Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 1998-1999 IBM Corp. All rights reserved.
  *
@@ -20,6 +21,8 @@
 
 package com.sun.corba.ee.impl.io;
 
+import com.sun.corba.ee.impl.encoding.CDRInputObject;
+import com.sun.corba.ee.impl.encoding.CDROutputObject;
 import com.sun.corba.ee.impl.javax.rmi.CORBA.Util;
 import com.sun.corba.ee.impl.misc.ClassInfoCache;
 import com.sun.corba.ee.impl.util.RepositoryId;
@@ -137,6 +140,19 @@ public final class ValueHandlerImpl implements javax.rmi.CORBA.ValueHandlerMulti
     private ValueHandlerImpl() {
     }
 
+    /**
+     * Whether this handler keeps its bridge in the ORB stream's own field, given the handler already recorded there.
+     *
+     * <p>The maps below held the bridge of every stream a value was being read from or written to, shared by every thread:
+     * each top level value cost a put and a remove on one ConcurrentHashMap, which in a profile of a 50 node list was 2%
+     * of server CPU. A stream is used by one thread at a time, so its bridge can live in the stream. The maps remain for
+     * streams that are not the ORB's, and for a stream another handler is using, so that two handlers never share a
+     * bridge, as they never shared a map entry.
+     */
+    private boolean bridgeFieldOf(Object owner) {
+        return owner == null || owner == this;
+    }
+
     static ValueHandlerImpl getInstance() {
         return new ValueHandlerImpl();
     }
@@ -159,12 +175,20 @@ public final class ValueHandlerImpl implements javax.rmi.CORBA.ValueHandlerMulti
 
         org.omg.CORBA_2_3.portable.OutputStream out = (org.omg.CORBA_2_3.portable.OutputStream) _out;
 
-        IIOPOutputStream jdkToOrbOutputStreamBridge = outputStreamPairs.get(_out);
+        // The ORB's own streams carry their bridge; see bridgeFieldOf.
+        CDROutputObject cdr = _out instanceof CDROutputObject ? (CDROutputObject) _out : null;
+        boolean onStream = cdr != null && bridgeFieldOf(cdr.getValueHandlerOwner());
+        IIOPOutputStream jdkToOrbOutputStreamBridge = onStream ? (IIOPOutputStream) cdr.getValueHandlerBridge()
+                : outputStreamPairs.get(_out);
 
         if (jdkToOrbOutputStreamBridge == null) {
             jdkToOrbOutputStreamBridge = createOutputStream();
             jdkToOrbOutputStreamBridge.setOrbStream(out);
-            outputStreamPairs.put(_out, jdkToOrbOutputStreamBridge);
+            if (onStream) {
+                cdr.setValueHandlerBridge(this, jdkToOrbOutputStreamBridge);
+            } else {
+                outputStreamPairs.put(_out, jdkToOrbOutputStreamBridge);
+            }
         }
 
         try {
@@ -172,7 +196,11 @@ public final class ValueHandlerImpl implements javax.rmi.CORBA.ValueHandlerMulti
             writeValueInternal(jdkToOrbOutputStreamBridge, out, value, streamFormatVersion);
         } finally {
             if (jdkToOrbOutputStreamBridge.decreaseRecursionDepth() == 0) {
-                outputStreamPairs.remove(_out);
+                if (onStream) {
+                    cdr.setValueHandlerBridge(null, null);
+                } else {
+                    outputStreamPairs.remove(_out);
+                }
             }
         }
     }
@@ -213,14 +241,22 @@ public final class ValueHandlerImpl implements javax.rmi.CORBA.ValueHandlerMulti
 
         org.omg.CORBA_2_3.portable.InputStream in = (org.omg.CORBA_2_3.portable.InputStream) _in;
 
-        IIOPInputStream jdkToOrbInputStreamBridge = inputStreamPairs.get(_in);
+        // The ORB's own streams carry their bridge; see bridgeFieldOf.
+        CDRInputObject cdr = _in instanceof CDRInputObject ? (CDRInputObject) _in : null;
+        boolean onStream = cdr != null && bridgeFieldOf(cdr.getValueHandlerOwner());
+        IIOPInputStream jdkToOrbInputStreamBridge = onStream ? (IIOPInputStream) cdr.getValueHandlerBridge()
+                : inputStreamPairs.get(_in);
         if (jdkToOrbInputStreamBridge == null) {
             jdkToOrbInputStreamBridge = createInputStream();
             jdkToOrbInputStreamBridge.setOrbStream(in);
             jdkToOrbInputStreamBridge.setSender(sender);
             // backward compatability 4365188
             jdkToOrbInputStreamBridge.setValueHandler(this);
-            inputStreamPairs.put(_in, jdkToOrbInputStreamBridge);
+            if (onStream) {
+                cdr.setValueHandlerBridge(this, jdkToOrbInputStreamBridge);
+            } else {
+                inputStreamPairs.put(_in, jdkToOrbInputStreamBridge);
+            }
         }
 
         try {
@@ -228,7 +264,11 @@ public final class ValueHandlerImpl implements javax.rmi.CORBA.ValueHandlerMulti
             result = readValueInternal(jdkToOrbInputStreamBridge, in, offset, clazz, repositoryID, sender);
         } finally {
             if (jdkToOrbInputStreamBridge.decreaseRecursionDepth() == 0) {
-                inputStreamPairs.remove(_in);
+                if (onStream) {
+                    cdr.setValueHandlerBridge(null, null);
+                } else {
+                    inputStreamPairs.remove(_in);
+                }
             }
         }
 

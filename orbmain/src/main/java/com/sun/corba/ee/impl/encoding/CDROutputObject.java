@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation
  * Copyright (c) 1997, 2020 Oracle and/or its affiliates.
  *
  * This program and the accompanying materials are made available under the
@@ -59,6 +60,12 @@ public class CDROutputObject extends org.omg.CORBA_2_3.portable.OutputStream
     private transient Message header;
     private transient MessageMediator corbaMessageMediator;
     private transient Connection connection;
+
+    // While the value handler is reading or writing a value on this stream:
+    // the handler and its bridge to Java serialization. Kept here rather than
+    // in a map shared by every thread; see ValueHandlerImpl.
+    private transient Object valueHandlerOwner;
+    private transient Object valueHandlerBridge;
 
     // todo this is only used in a pair of legacy tests. Rewrite them as unit tests and remove this method.
     public void sendFirstFragment() {
@@ -691,6 +698,33 @@ public class CDROutputObject extends org.omg.CORBA_2_3.portable.OutputStream
             return new CDRInputObject(orb, null, byteBuffer, messageHeader);
         }
     }
-}
 
-// End of file.
+    /**
+     * The value handler that has a bridge on this stream, or null.
+     *
+     * @return the handler given to {@link #setValueHandlerBridge}
+     */
+    public Object getValueHandlerOwner() {
+        return valueHandlerOwner;
+    }
+
+    /**
+     * The bridge to Java serialization that the value handler is using on this stream, or null.
+     *
+     * @return the bridge given to {@link #setValueHandlerBridge}
+     */
+    public Object getValueHandlerBridge() {
+        return valueHandlerBridge;
+    }
+
+    /**
+     * Records the bridge a value handler uses on this stream while it writes a value, or clears it with nulls.
+     *
+     * @param owner the value handler
+     * @param bridge its bridge
+     */
+    public void setValueHandlerBridge(Object owner, Object bridge) {
+        valueHandlerOwner = owner;
+        valueHandlerBridge = bridge;
+    }
+}

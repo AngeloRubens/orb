@@ -1,4 +1,5 @@
 /*
+ * Copyright (c) 2026 Contributors to the Eclipse Foundation
  * Copyright (c) 1997, 2020 Oracle and/or its affiliates.
  *
  * This program and the accompanying materials are made available under the
@@ -54,6 +55,12 @@ public class CDRInputObject extends org.omg.CORBA_2_3.portable.InputStream imple
     private transient ORB orb;
     private transient CDRInputStreamBase impl;
     private transient Connection corbaConnection;
+
+    // While the value handler is reading or writing a value on this stream:
+    // the handler and its bridge to Java serialization. Kept here rather than
+    // in a map shared by every thread; see ValueHandlerImpl.
+    private transient Object valueHandlerOwner;
+    private transient Object valueHandlerBridge;
     private transient Message header;
     protected transient MessageMediator messageMediator;
 
@@ -787,6 +794,33 @@ public class CDRInputObject extends org.omg.CORBA_2_3.portable.InputStream imple
     public void end_value() {
         impl.end_value();
     }
-}
 
-// End of file.
+    /**
+     * The value handler that has a bridge on this stream, or null.
+     *
+     * @return the handler given to {@link #setValueHandlerBridge}
+     */
+    public Object getValueHandlerOwner() {
+        return valueHandlerOwner;
+    }
+
+    /**
+     * The bridge to Java serialization that the value handler is using on this stream, or null.
+     *
+     * @return the bridge given to {@link #setValueHandlerBridge}
+     */
+    public Object getValueHandlerBridge() {
+        return valueHandlerBridge;
+    }
+
+    /**
+     * Records the bridge a value handler uses on this stream while it reads a value, or clears it with nulls.
+     *
+     * @param owner the value handler
+     * @param bridge its bridge
+     */
+    public void setValueHandlerBridge(Object owner, Object bridge) {
+        valueHandlerOwner = owner;
+        valueHandlerBridge = bridge;
+    }
+}
