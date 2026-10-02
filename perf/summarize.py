@@ -19,6 +19,7 @@ CONFIGS = {
     "B": "ORB master, without these changes, 1 KB fragments",
     "B8": "ORB master, 8 KB fragments (buffer = fragment)",
     "B64": "ORB master, 64 KB fragments (buffer = fragment)",
+    "B8d": "ORB master, 8 KB fragments, orb-iiop starting messages in a 1 KB buffer",
     "C8": "ORB + orb-iiop with these changes, 8 KB fragments, 1 KB initial buffer",
     "C": "ORB + orb-iiop with these changes, 1 KB fragments",
     "C64": "ORB + orb-iiop with these changes, 64 KB fragments, 1 KB initial buffer",

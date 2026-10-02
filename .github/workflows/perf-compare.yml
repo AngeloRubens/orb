@@ -140,6 +140,15 @@ jobs:
           mvn package -DskipTests -pl appserver/orb/orb-iiop
           cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-patched.jar"
 
+      - name: Build orb-iiop ${{ env.GLASSFISH_VERSION }} with only the initial buffer size change
+        if: contains(inputs.configs, 'B8d')
+        run: |
+          git clone -q --depth 1 --branch "$GLASSFISH_VERSION" https://github.com/eclipse-ee4j/glassfish.git "$RUNNER_TEMP/glassfish-buffer"
+          cd "$RUNNER_TEMP/glassfish-buffer"
+          git apply "$GITHUB_WORKSPACE"/perf/gf-patches-buffer/*.patch
+          mvn package -DskipTests -pl appserver/orb/orb-iiop
+          cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-buffer.jar"
+
       - name: Build the work queue as first rewritten, on LinkedTransferQueue
         # Only Bltq, Cltq and C64ltq install this jar. Building it for a run
         # that asked for none of them is four minutes of the runner spent on
