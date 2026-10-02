@@ -2,8 +2,11 @@
 """Turns the RESULT lines written by compare.sh into a Markdown report.
 
 For each scenario and config: the median over rounds of throughput and of the
-latency percentiles, and throughput relative to A (GlassFish as released) and
-to B (ORB master without these changes).
+latency percentiles, and throughput relative to A (GlassFish as released), to B
+(ORB master without these changes) and to Cb (the stack under the change being
+measured). When the lines carry the server's CPU use, also its median in cores
+and in CPU microseconds per call, the latter relative to Cb or else to B: less
+is better, and it depends far less on the runner than throughput.
 """
 import re
 import statistics
@@ -21,6 +24,7 @@ CONFIGS = {
     "Cnq": "as C, but the work queue from master (the monitor)",
     "Bq": "as B, plus only the new work queue",
     "Bltq": "as B, plus the work queue on LinkedTransferQueue (first rewrite)",
+    "Cb": "as C, with the ORB built from the baseline ref: the stack under the change being measured",
     "Cnf": "as C, without processing the next fragment inline",
     "Cltq": "as C, with the work queue on LinkedTransferQueue",
     "C64ltq": "as C64, with the work queue on LinkedTransferQueue",
@@ -33,6 +37,7 @@ SCENARIOS = {
 
 line_re = re.compile(r"config=(\S+) round=(\d+) RESULT (?:bean=(\S+) )?scenario=(\S+) .*? calls=(\d+) errors=(\d+) "
                      r"throughput=(\d+)/s p50=([\d.,]+)ms p90=([\d.,]+)ms p99=([\d.,]+)ms")
+cpu_re = re.compile(r"serverCores=([\d.]+) serverUsPerCall=([\d.]+)")
 
 
 def num(s):
@@ -47,11 +52,14 @@ for line in open(sys.argv[1]):
         continue
     config, _, bean, scenario, _, err, tput, p50, p90, p99 = m.groups()
     errors += int(err)
-    runs[((bean or "GreeterBean"), scenario, config)].append((float(tput), num(p50), num(p90), num(p99)))
+    cpu = cpu_re.search(line)
+    cores, us = (float(cpu.group(1)), float(cpu.group(2))) if cpu else (None, None)
+    runs[((bean or "GreeterBean"), scenario, config)].append((float(tput), num(p50), num(p90), num(p99), cores, us))
 
 configs = [c for c in CONFIGS if any(k[2] == c for k in runs)]
 out = ["## ORB before/after, same runner, same GlassFish install", ""]
-out.append("Median of the rounds. Throughput in calls/s (higher is better), latency in ms.")
+out.append("Median of the rounds. Throughput in calls/s (higher is better), latency in ms. "
+           "Server CPU, where measured: cores busy on average, and CPU microseconds per call (lower is better).")
 out.append("")
 for c in configs:
     out.append(f"- **{c}**: {CONFIGS[c]}")
@@ -67,15 +75,30 @@ for bean, bdesc in BEANS.items():
     rows = [(c, runs[(bean, sc, c)]) for c in configs if runs.get((bean, sc, c))]
     if not rows:
         continue
-    med = {c: [statistics.median(x[i] for x in r) for i in range(4)] for c, r in rows}
+    def median(r, i):
+        values = [x[i] for x in r if x[i] is not None]
+        return statistics.median(values) if values else None
+    med = {c: [median(r, i) for i in range(6)] for c, r in rows}
+    with_cpu = any(m[5] is not None for m in med.values())
+    cpu_ref = "Cb" if "Cb" in med else "B"
     out.append(f"### {bean} ({bdesc}) - {sc}: {desc}")
     out.append("")
-    out.append("| config | calls/s | vs A | vs B | p50 | p90 | p99 | rounds |")
-    out.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    head = "| config | calls/s | vs A | vs B | vs Cb | p50 | p90 | p99 |"
+    rule = "|---|---:|---:|---:|---:|---:|---:|---:|"
+    if with_cpu:
+        head += f" server cores | server us/call | us/call vs {cpu_ref} |"
+        rule += "---:|---:|---:|"
+    out.append(head + " rounds |")
+    out.append(rule + "---:|")
     for c, r in rows:
-        t, p50, p90, p99 = med[c]
+        t, p50, p90, p99, cores, us = med[c]
         vs = lambda ref: f"{t / med[ref][0]:.2f}x" if ref in med and ref != c else ""
-        out.append(f"| {c} | {t:,.0f} | {vs('A')} | {vs('B')} | {p50:.3f} | {p90:.3f} | {p99:.3f} | {len(r)} |")
+        row = f"| {c} | {t:,.0f} | {vs('A')} | {vs('B')} | {vs('Cb')} | {p50:.3f} | {p90:.3f} | {p99:.3f} |"
+        if with_cpu:
+            ref_us = med[cpu_ref][5] if cpu_ref in med else None
+            rel = f"{(us / ref_us - 1) * 100:+.1f}%" if us is not None and ref_us and c != cpu_ref else ""
+            row += f" {cores:.2f} | {us:.1f} | {rel} |" if us is not None else " | | |"
+        out.append(row + f" {len(r)} |")
     out.append("")
 
 out.append(f"Errors across all runs: {errors}")

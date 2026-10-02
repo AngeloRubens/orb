@@ -24,12 +24,25 @@
 #
 # Rounds interleave the configs so that drift on the machine hits all of them.
 #
+# Client and server share the runner. With SERVER_CPUS and CLIENT_CPUS set
+# (taskset CPU lists) each gets its own cores, so neither takes CPU from the
+# other. Each RESULT line also gets the server's CPU use, read from /proc
+# over a window inside the client's measurement: serverCores (cores busy on
+# average) and serverUsPerCall (server CPU microseconds per call). That one
+# depends far less on the machine than throughput does: it says how much
+# work the server did, not how fast a shared machine let it go.
+#
 # Environment: GF (glassfish8 dir), JARS, CLIENT (load client jar), RUN_JAVA
-# (JDK used to run), OUT, JFR_DIR, and optionally W, D, TH.
+# (JDK used to run), OUT, JFR_DIR, and optionally W, D, TH, SERVER_CPUS,
+# CLIENT_CPUS.
 set -u
 
 MOD=$GF/glassfish/modules
 W=${W:-15}; D=${D:-45}; TH=${TH:-8}
+# The CPU window starts CPU_SKIP seconds into the client's measurement, to
+# leave room for the client to start, and ends CPU_TAIL seconds before it.
+CPU_SKIP=10; CPU_TAIL=5
+HZ=$(getconf CLK_TCK)
 SCENARIOS=${SCENARIOS:-small graph large}
 BEANS=${BEANS:-GreeterBean}
 export JAVA_HOME=$RUN_JAVA AS_JAVA=$RUN_JAVA
@@ -60,16 +73,48 @@ server_pid() {
     "$RUN_JAVA/bin/jcmd" -l | awk '/GlassFishMain/ && /domain1/ {print $1; exit}'
 }
 
+cpu_ticks() {   # pid: user + system time so far, in clock ticks
+    awk '{print $14 + $15}' "/proc/$1/stat"
+}
+
 run() {   # config round scenario client-properties bean
     local label=$1-r$2-$3-$5
-    "$RUN_JAVA/bin/jcmd" "$(server_pid)" JFR.start name=$label settings=profile \
+    local pid; pid=$(server_pid)
+    if [ -n "${SERVER_CPUS:-}" ]; then
+        # Every thread the server has; the ones it starts later inherit it.
+        taskset -a -p -c "$SERVER_CPUS" "$pid" >/dev/null || echo "server not pinned for $label"
+    fi
+    "$RUN_JAVA/bin/jcmd" "$pid" JFR.start name=$label settings=profile \
         delay=${W}s duration=${D}s filename="$JFR_DIR/server-$label.jfr" >/dev/null \
         || echo "JFR not started for $label"
     local log="$JFR_DIR/client-$label.log"
+    local client=("$GF/glassfish/bin/appclient" -client "$CLIENT")
+    if [ -n "${CLIENT_CPUS:-}" ]; then
+        client=(taskset -c "$CLIENT_CPUS" "${client[@]}")
+    fi
     VMARGS="-Dscenario=$3 -Dbean=$5 -Dthreads=$TH -Dwarmup=$W -Dseconds=$D $4" \
-        "$GF/glassfish/bin/appclient" -client "$CLIENT" > "$log" 2>&1
+        "${client[@]}" > "$log" 2>&1 &
+    local client_pid=$!
+    local cpu=""
+    if [ "$D" -gt $((CPU_SKIP + CPU_TAIL)) ]; then
+        sleep $((W + CPU_SKIP))
+        local t0 c0 t1 c1
+        t0=$(date +%s.%N); c0=$(cpu_ticks "$pid")
+        sleep $((D - CPU_SKIP - CPU_TAIL))
+        t1=$(date +%s.%N); c1=$(cpu_ticks "$pid")
+        cpu=$(LC_ALL=C awk -v c="$((c1 - c0))" -v hz="$HZ" -v t0="$t0" -v t1="$t1" \
+            'BEGIN {printf "%.3f", c / hz / (t1 - t0)}')
+    fi
+    wait "$client_pid"
     if grep -q 'RESULT' "$log"; then
-        grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | tee -a "$OUT"
+        grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | while read -r line; do
+            if [ -n "$cpu" ]; then
+                local tput=${line##*throughput=}; tput=${tput%%/s*}
+                line="$line serverCores=$cpu serverUsPerCall=$(LC_ALL=C awk -v c="$cpu" -v t="$tput" \
+                    'BEGIN {printf "%.1f", (t > 0 ? c / t * 1e6 : 0)}')"
+            fi
+            echo "$line"
+        done | tee -a "$OUT"
     else
         echo "NO RESULT for $label; the client said:"
         grep -vE '^\s*$' "$log" | grep -iE 'exception|error|caused by' | head -15

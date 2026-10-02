@@ -28,6 +28,9 @@ on:
       baseline_ref:
         description: "Branch or SHA for config Cb, to measure one change against the stack under it (empty skips it)"
         default: ""
+      pinning:
+        description: "Cores for server/client: auto (half each, from 4 cores up), none, or taskset lists as server/client"
+        default: "auto"
 
 env:
   GLASSFISH_VERSION: 8.0.4
@@ -192,8 +195,22 @@ jobs:
           JFR_DIR: ${{ github.workspace }}/results/jfr
           SCENARIOS: ${{ inputs.scenarios || 'small graph large' }}
           BEANS: ${{ inputs.beans || 'GreeterBean' }}
+          PINNING: ${{ inputs.pinning || 'auto' }}
         run: |
           mkdir -p results
+          # Client and server on separate cores, so that neither takes CPU
+          # from the other; see perf/compare.sh.
+          case "$PINNING" in
+            auto)
+              n=$(nproc)
+              if [ "$n" -ge 4 ]; then
+                export CLIENT_CPUS=0-$((n / 2 - 1)) SERVER_CPUS=$((n / 2))-$((n - 1))
+              fi ;;
+            none) ;;
+            */*) export SERVER_CPUS=${PINNING%/*} CLIENT_CPUS=${PINNING#*/} ;;
+            *) echo "pinning must be auto, none or server/client, not $PINNING"; exit 1 ;;
+          esac
+          echo "Server CPUs: ${SERVER_CPUS:-not pinned}, client CPUs: ${CLIENT_CPUS:-not pinned}" | tee -a "$GITHUB_STEP_SUMMARY"
           perf/compare.sh "${{ inputs.rounds || '2' }}" ${{ inputs.configs || 'A B B64 C C64' }}
 
       - name: Summary
