@@ -38,6 +38,9 @@ SCENARIOS = {
 line_re = re.compile(r"config=(\S+) round=(\d+) RESULT (?:bean=(\S+) )?scenario=(\S+) .*? calls=(\d+) errors=(\d+) "
                      r"throughput=(\d+)/s p50=([\d.,]+)ms p90=([\d.,]+)ms p99=([\d.,]+)ms")
 cpu_re = re.compile(r"serverCores=([\d.]+) serverUsPerCall=([\d.]+)")
+io_re = re.compile(r"serverWritesPerCall=([\d.]+) serverReadsPerCall=([\d.]+) "
+                   r"serverBytesOutPerCall=(\d+) serverBytesInPerCall=(\d+)")
+io_runs = defaultdict(list)
 
 
 def num(s):
@@ -54,6 +57,9 @@ for line in open(sys.argv[1]):
     errors += int(err)
     cpu = cpu_re.search(line)
     cores, us = (float(cpu.group(1)), float(cpu.group(2))) if cpu else (None, None)
+    io = io_re.search(line)
+    if io:
+        io_runs[((bean or "GreeterBean"), scenario, config)].append(tuple(float(g) for g in io.groups()))
     runs[((bean or "GreeterBean"), scenario, config)].append((float(tput), num(p50), num(p90), num(p99), cores, us))
 
 configs = [c for c in CONFIGS if any(k[2] == c for k in runs)]
@@ -100,6 +106,16 @@ for bean, bdesc in BEANS.items():
             row += f" {cores:.2f} | {us:.1f} | {rel} |" if us is not None else " | | |"
         out.append(row + f" {len(r)} |")
     out.append("")
+    io_rows = [(c, io_runs[(bean, sc, c)]) for c in configs if io_runs.get((bean, sc, c))]
+    if io_rows:
+        out.append("Server I/O per call (median of the rounds): system calls and bytes.")
+        out.append("")
+        out.append("| config | writes | reads | bytes out | bytes in |")
+        out.append("|---|---:|---:|---:|---:|")
+        for c, r in io_rows:
+            w, rd, bo, bi = (statistics.median(x[i] for x in r) for i in range(4))
+            out.append(f"| {c} | {w:.2f} | {rd:.2f} | {bo:,.0f} | {bi:,.0f} |")
+        out.append("")
 
 out.append(f"Errors across all runs: {errors}")
 print("\n".join(out))

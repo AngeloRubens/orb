@@ -30,7 +30,10 @@
 # over a window inside the client's measurement: serverCores (cores busy on
 # average) and serverUsPerCall (server CPU microseconds per call). That one
 # depends far less on the machine than throughput does: it says how much
-# work the server did, not how fast a shared machine let it go.
+# work the server did, not how fast a shared machine let it go. Over the
+# same window, from /proc/<pid>/io: the server's write and read system
+# calls per call (serverWritesPerCall, serverReadsPerCall) and the bytes it
+# wrote and read per call (serverBytesOutPerCall, serverBytesInPerCall).
 #
 # Environment: GF (glassfish8 dir), JARS, CLIENT (load client jar), RUN_JAVA
 # (JDK used to run), OUT, JFR_DIR, and optionally W, D, TH, SERVER_CPUS,
@@ -77,6 +80,11 @@ cpu_ticks() {   # pid: user + system time so far, in clock ticks
     awk '{print $14 + $15}' "/proc/$1/stat"
 }
 
+io_counts() {   # pid: write calls, read calls, bytes written, bytes read so far
+    awk '/^syscw:/ {w = $2} /^syscr:/ {r = $2} /^wchar:/ {wb = $2} /^rchar:/ {rb = $2}
+         END {print w, r, wb, rb}' "/proc/$1/io"
+}
+
 run() {   # config round scenario client-properties bean
     local label=$1-r$2-$3-$5
     local pid; pid=$(server_pid)
@@ -98,20 +106,26 @@ run() {   # config round scenario client-properties bean
     local cpu=""
     if [ "$D" -gt $((CPU_SKIP + CPU_TAIL)) ]; then
         sleep $((W + CPU_SKIP))
-        local t0 c0 t1 c1
-        t0=$(date +%s.%N); c0=$(cpu_ticks "$pid")
+        local t0 c0 t1 c1 io0 io1
+        t0=$(date +%s.%N); c0=$(cpu_ticks "$pid"); io0=$(io_counts "$pid")
         sleep $((D - CPU_SKIP - CPU_TAIL))
-        t1=$(date +%s.%N); c1=$(cpu_ticks "$pid")
+        t1=$(date +%s.%N); c1=$(cpu_ticks "$pid"); io1=$(io_counts "$pid")
+        # Seconds, cores busy, then per second: writes, reads, bytes out, bytes in.
         cpu=$(LC_ALL=C awk -v c="$((c1 - c0))" -v hz="$HZ" -v t0="$t0" -v t1="$t1" \
-            'BEGIN {printf "%.3f", c / hz / (t1 - t0)}')
+            -v a="$io0" -v b="$io1" 'BEGIN {
+                split(a, x, " "); split(b, y, " "); s = t1 - t0
+                printf "%.3f %.3f %.1f %.1f %.1f %.1f", s, c / hz / s,
+                    (y[1] - x[1]) / s, (y[2] - x[2]) / s, (y[3] - x[3]) / s, (y[4] - x[4]) / s}')
     fi
     wait "$client_pid"
     if grep -q 'RESULT' "$log"; then
         grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | while read -r line; do
             if [ -n "$cpu" ]; then
                 local tput=${line##*throughput=}; tput=${tput%%/s*}
-                line="$line serverCores=$cpu serverUsPerCall=$(LC_ALL=C awk -v c="$cpu" -v t="$tput" \
-                    'BEGIN {printf "%.1f", (t > 0 ? c / t * 1e6 : 0)}')"
+                line="$line $(LC_ALL=C awk -v m="$cpu" -v t="$tput" 'BEGIN {
+                    split(m, v, " "); if (t <= 0) t = 1
+                    printf "serverCores=%.3f serverUsPerCall=%.1f serverWritesPerCall=%.2f serverReadsPerCall=%.2f serverBytesOutPerCall=%.0f serverBytesInPerCall=%.0f",
+                        v[2], v[2] / t * 1e6, v[3] / t, v[4] / t, v[5] / t, v[6] / t}')"
             fi
             echo "$line"
         done | tee -a "$OUT"
