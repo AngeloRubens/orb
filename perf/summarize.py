@@ -15,6 +15,7 @@ from collections import defaultdict
 
 CONFIGS = {
     "A": "GlassFish 8.0.4 as released (ORB 5.0.2), 1 KB fragments",
+    "A8": "GlassFish 8.0.4 as released (ORB 5.0.2), 8 KB fragments (buffer = fragment)",
     "B": "ORB master, without these changes, 1 KB fragments",
     "B8": "ORB master, 8 KB fragments (buffer = fragment)",
     "B64": "ORB master, 64 KB fragments (buffer = fragment)",

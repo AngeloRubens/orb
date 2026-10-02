@@ -7,6 +7,7 @@
 #
 # Configs (jars are looked up in $JARS):
 #   A    GlassFish as released: its ORB, its orb-iiop, 1 KB fragments
+#   A8   as A with 8 KB fragments: only GlassFish's default changed
 #   B    ORB master without these changes, released orb-iiop, 1 KB fragments
 #   B8   as B with 8 KB fragments, buffers as large as a fragment
 #   B64  as B with 64 KB fragments, buffers as large as a fragment
@@ -142,6 +143,8 @@ for r in $(seq 1 "$rounds"); do
         client=""
         case $c in
             A)   install orb-released.jar internal-api-released.jar orb-iiop-released.jar 1024 ;;
+            A8)  install orb-released.jar internal-api-released.jar orb-iiop-released.jar 8192
+                 client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=8192" ;;
             B)   install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 1024 ;;
             B64) install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 65536
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=65536 -Dcom.sun.corba.ee.giop.ORBBufferSize=65536" ;;
