@@ -126,6 +126,10 @@ run() {   # config round scenario client-properties bean
     "$RUN_JAVA/bin/jcmd" "$pid" GC.class_histogram 2>/dev/null \
         | grep -E 'GlassFishLogRecord|StartupQueue|java.util.logging.LogRecord$' \
         | sed "s/^/$label /" >> "$JFR_DIR/histogram.txt"
+    # Whether the debug messages of the per-call code reach the log at all.
+    local log=$GF/glassfish/domains/domain1/logs/server.log
+    echo "$label server.log lines=$(wc -l < "$log") getEjbDescriptor=$(grep -c 'getEjbDescriptor' "$log") FINE=$(grep -c 'FINE' "$log")" \
+        >> "$JFR_DIR/histogram.txt"
     if grep -q 'RESULT' "$log"; then
         grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | while read -r line; do
             if [ -n "$cpu" ]; then
@@ -182,4 +186,5 @@ for r in $(seq 1 "$rounds"); do
         done
     done
 done
+"$GF/bin/asadmin" list-log-levels 2>/dev/null | grep -iE 'iiop|exousia|invocation|^org.glassfish |^\.|root' > "$JFR_DIR/log-levels.txt"
 "$GF/bin/asadmin" stop-domain >/dev/null 2>&1
