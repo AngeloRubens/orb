@@ -11,6 +11,7 @@
 #   B    ORB master without these changes, released orb-iiop, 1 KB fragments
 #   B8   as B with 8 KB fragments, buffers as large as a fragment
 #   B8d  as B8 with orb-iiop starting messages in a 1 KB buffer (only that change)
+#   Be   as B with orb-iiop resolving the EJB service once (only that change)
 #   B64  as B with 64 KB fragments, buffers as large as a fragment
 #   C8   as C with 8 KB fragments, buffers starting at 1 KB
 #   C    ORB and orb-iiop with these changes, 1 KB fragments (the default)
@@ -157,6 +158,7 @@ for r in $(seq 1 "$rounds"); do
             Bltq) install orb-master.jar  internal-api-ltq.jar      orb-iiop-released.jar 1024 ;;
             B8)  install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 8192
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=8192" ;;
+            Be)  install orb-master.jar   internal-api-master.jar   orb-iiop-ejbsvc.jar   1024 ;;
             B8d) install orb-master.jar   internal-api-master.jar   orb-iiop-buffer.jar   8192
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
             C8)  install orb-patched.jar  internal-api-patched.jar  orb-iiop-patched.jar  8192
