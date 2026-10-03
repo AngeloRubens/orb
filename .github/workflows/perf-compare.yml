@@ -149,6 +149,17 @@ jobs:
           mvn package -DskipTests -pl appserver/orb/orb-iiop
           cp appserver/orb/orb-iiop/target/orb-iiop.jar "$GITHUB_WORKSPACE/jars/orb-iiop-buffer.jar"
 
+      - name: Build Exousia from the fork, with and without the authorization change
+        if: contains(inputs.configs, 'Bx')
+        run: |
+          for b in 3.x:exousia-3x perf/authorization-checks-3.x:exousia-patched; do
+            ref=${b%%:*}; name=${b##*:}
+            git clone -q --depth 1 --branch "$ref" https://github.com/AngeloRubens/exousia.git "$RUNNER_TEMP/$name"
+            (cd "$RUNNER_TEMP/$name" && mvn package -DskipTests)
+            cp "$RUNNER_TEMP/$name"/impl/target/exousia-*-SNAPSHOT.jar "jars/$name.jar"
+          done
+          ls -la jars/exousia-*.jar
+
       - name: Build orb-iiop ${{ env.GLASSFISH_VERSION }} with only the EJB service lookup change
         if: contains(inputs.configs, 'Be')
         run: |

@@ -12,6 +12,8 @@
 #   B8   as B with 8 KB fragments, buffers as large as a fragment
 #   B8d  as B8 with orb-iiop starting messages in a 1 KB buffer (only that change)
 #   Be   as B with orb-iiop resolving the EJB service once (only that change)
+#   Bx0  as B with Exousia built from its 3.x branch on the fork
+#   Bx   as B with Exousia built from the fork's perf/authorization-checks-3.x
 #   B64  as B with 64 KB fragments, buffers as large as a fragment
 #   C8   as C with 8 KB fragments, buffers starting at 1 KB
 #   C    ORB and orb-iiop with these changes, 1 KB fragments (the default)
@@ -54,7 +56,15 @@ BEANS=${BEANS:-GreeterBean}
 export JAVA_HOME=$RUN_JAVA AS_JAVA=$RUN_JAVA
 mkdir -p "$JFR_DIR"
 
-install() {   # orb internal-api orb-iiop fragment-size
+# The Exousia jar GlassFish ships, kept so that every configuration but Bx
+# and Bx0 runs with it.
+EXOUSIA_JAR=$(ls "$MOD" | grep -i '^exousia.*\.jar$' | head -1)
+if [ -n "$EXOUSIA_JAR" ] && [ ! -f "$JARS/exousia-released.jar" ]; then
+    cp "$MOD/$EXOUSIA_JAR" "$JARS/exousia-released.jar"
+fi
+FAILED=0
+
+install() {   # orb internal-api orb-iiop fragment-size [exousia]
     # Checked before anything is stopped. A jar that was never built - a
     # configuration asked for without the workflow input that produces its
     # jar - would otherwise leave the previous configuration's jar in the
@@ -68,6 +78,9 @@ install() {   # orb internal-api orb-iiop fragment-size
     cp "$JARS/$1" "$MOD/glassfish-corba-orb.jar" || return 1
     cp "$JARS/$2" "$MOD/glassfish-corba-internal-api.jar" || return 1
     cp "$JARS/$3" "$MOD/orb-iiop.jar" || return 1
+    if [ -n "$EXOUSIA_JAR" ]; then
+        cp "$JARS/${5:-exousia-released.jar}" "$MOD/$EXOUSIA_JAR" || return 1
+    fi
     rm -rf "$GF/glassfish/domains/domain1/osgi-cache"
     "$GF/bin/asadmin" start-domain >/dev/null || return 1
     "$GF/bin/asadmin" set configs.config.server-config.iiop-service.orb.message-fragment-size=$4 >/dev/null
@@ -148,6 +161,7 @@ run() {   # config round scenario client-properties bean
         done | tee -a "$OUT"
     else
         echo "NO RESULT for $label; the client said:"
+        FAILED=$((FAILED + 1))
         grep -vE '^\s*$' "$log" | grep -iE 'exception|error|caused by' | head -15
     fi
     sleep 3
@@ -172,6 +186,8 @@ for r in $(seq 1 "$rounds"); do
             Bltq) install orb-master.jar  internal-api-ltq.jar      orb-iiop-released.jar 1024 ;;
             B8)  install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 8192
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=8192" ;;
+            Bx0) install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 1024 exousia-3x.jar ;;
+            Bx)  install orb-master.jar   internal-api-master.jar   orb-iiop-released.jar 1024 exousia-patched.jar ;;
             Be)  install orb-master.jar   internal-api-master.jar   orb-iiop-ejbsvc.jar   1024 ;;
             B8d) install orb-master.jar   internal-api-master.jar   orb-iiop-buffer.jar   8192
                  client="-Dcom.sun.corba.ee.giop.ORBFragmentSize=8192 -Dcom.sun.corba.ee.giop.ORBBufferSize=1024" ;;
@@ -193,3 +209,8 @@ for r in $(seq 1 "$rounds"); do
 done
 "$GF/bin/asadmin" list-log-levels 2>/dev/null | grep -iE 'iiop|exousia|invocation|^org.glassfish |^\.|root' > "$JFR_DIR/log-levels.txt"
 "$GF/bin/asadmin" stop-domain >/dev/null 2>&1
+# A run that measured nothing must not look like a success.
+if [ "$FAILED" -gt 0 ]; then
+    echo "$FAILED measurements produced no result"
+    exit 1
+fi

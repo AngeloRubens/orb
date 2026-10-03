@@ -22,6 +22,8 @@ CONFIGS = {
     "B64": "ORB master, 64 KB fragments (buffer = fragment)",
     "B8d": "ORB master, 8 KB fragments, orb-iiop starting messages in a 1 KB buffer",
     "Be": "ORB master, 1 KB fragments, orb-iiop resolving the EJB service once",
+    "Bx0": "ORB master, 1 KB fragments, Exousia from its 3.x branch",
+    "Bx": "ORB master, 1 KB fragments, Exousia 3.x with the authorization change",
     "C8": "ORB + orb-iiop with these changes, 8 KB fragments, 1 KB initial buffer",
     "C": "ORB + orb-iiop with these changes, 1 KB fragments",
     "C64": "ORB + orb-iiop with these changes, 64 KB fragments, 1 KB initial buffer",
