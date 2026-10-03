@@ -121,6 +121,11 @@ run() {   # config round scenario client-properties bean
                     (y[1] - x[1]) / s, (y[2] - x[2]) / s, (y[3] - x[3]) / s, (y[4] - x[4]) / s}')
     fi
     wait "$client_pid"
+    # After the measurement: live log records, which a logging system stuck
+    # before full service keeps in its startup queue.
+    "$RUN_JAVA/bin/jcmd" "$pid" GC.class_histogram 2>/dev/null \
+        | grep -E 'GlassFishLogRecord|StartupQueue|java.util.logging.LogRecord$' \
+        | sed "s/^/$label /" >> "$JFR_DIR/histogram.txt"
     if grep -q 'RESULT' "$log"; then
         grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | while read -r line; do
             if [ -n "$cpu" ]; then
