@@ -132,8 +132,8 @@ run() {   # config round scenario client-properties bean
             || echo "log probe failed for $label"
     fi
     # Whether the debug messages of the per-call code reach the log at all.
-    local log=$GF/glassfish/domains/domain1/logs/server.log
-    echo "$label server.log lines=$(wc -l < "$log") getEjbDescriptor=$(grep -c 'getEjbDescriptor' "$log") FINE=$(grep -c 'FINE' "$log")" \
+    local server_log=$GF/glassfish/domains/domain1/logs/server.log
+    echo "$label server.log lines=$(wc -l < "$server_log") getEjbDescriptor=$(grep -c 'getEjbDescriptor' "$server_log") FINE=$(grep -c 'FINE' "$server_log")" \
         >> "$JFR_DIR/histogram.txt"
     if grep -q 'RESULT' "$log"; then
         grep 'RESULT' "$log" | sed "s/^/config=$1 round=$2 /" | while read -r line; do
