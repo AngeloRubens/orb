@@ -216,6 +216,13 @@ jobs:
           PINNING: ${{ inputs.pinning || 'auto' }}
         run: |
           mkdir -p results
+          # A probe that reports the logging status from inside the server.
+          probe="$RUNNER_TEMP/logprobe"; mkdir -p "$probe/classes"
+          javac -d "$probe/classes" perf/diag/LogStatusAgent.java perf/diag/Attach.java
+          printf 'Agent-Class: LogStatusAgent\n' > "$probe/manifest.txt"
+          jar cfm "$probe/logstatus-agent.jar" "$probe/manifest.txt" -C "$probe/classes" LogStatusAgent.class
+          cp "$probe/classes/Attach.class" "$probe/"
+          export LOG_PROBE="$probe" LOG_PROBE_JAVA="$JAVA_HOME"
           # Client and server on separate cores, so that neither takes CPU
           # from the other; see perf/compare.sh.
           case "$PINNING" in

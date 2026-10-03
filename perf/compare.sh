@@ -126,6 +126,11 @@ run() {   # config round scenario client-properties bean
     "$RUN_JAVA/bin/jcmd" "$pid" GC.class_histogram 2>/dev/null \
         | grep -E 'GlassFishLogRecord|StartupQueue|java.util.logging.LogRecord$' \
         | sed "s/^/$label /" >> "$JFR_DIR/histogram.txt"
+    # Once: the logging status from inside the server, if the probe was built.
+    if [ -n "${LOG_PROBE:-}" ] && [ ! -f "$JFR_DIR/logstatus.txt" ]; then
+        "$LOG_PROBE_JAVA/bin/java" -cp "$LOG_PROBE" Attach "$pid" "$LOG_PROBE/logstatus-agent.jar" "$JFR_DIR/logstatus.txt" \
+            || echo "log probe failed for $label"
+    fi
     # Whether the debug messages of the per-call code reach the log at all.
     local log=$GF/glassfish/domains/domain1/logs/server.log
     echo "$label server.log lines=$(wc -l < "$log") getEjbDescriptor=$(grep -c 'getEjbDescriptor' "$log") FINE=$(grep -c 'FINE' "$log")" \
